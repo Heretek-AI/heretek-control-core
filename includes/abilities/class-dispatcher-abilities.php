@@ -47,9 +47,11 @@ class EMCP_Tools_Dispatcher_Abilities {
 		// Fold in the same WordPress core context abilities the server surfaces
 		// directly in full mode, so they stay listable + callable via call-tool
 		// in compact mode (where the top-level surface is just the 3 meta-tools).
-		if ( function_exists( 'wp_get_ability' ) ) {
+		// wp_has_ability() is the silent existence check — wp_get_ability() would
+		// _doing_it_wrong() for any core ability absent on this WP build.
+		if ( function_exists( 'wp_has_ability' ) ) {
 			foreach ( array( 'core/get-site-info', 'core/get-user-info', 'core/get-environment-info' ) as $core ) {
-				if ( wp_get_ability( $core ) && ! in_array( $core, $names, true ) ) {
+				if ( wp_has_ability( $core ) && ! in_array( $core, $names, true ) ) {
 					$names[] = $core;
 				}
 			}
@@ -64,7 +66,16 @@ class EMCP_Tools_Dispatcher_Abilities {
 	 * @return object|null
 	 */
 	protected function resolve_ability( string $name ) {
-		return function_exists( 'wp_get_ability' ) ? wp_get_ability( $name ) : null;
+		if ( ! function_exists( 'wp_get_ability' ) ) {
+			return null;
+		}
+		// Fail closed with the silent existence check first: resolving an
+		// unregistered/renamed name (drift, or a name-filter seam) through
+		// wp_get_ability() alone would _doing_it_wrong().
+		if ( function_exists( 'wp_has_ability' ) && ! wp_has_ability( $name ) ) {
+			return null;
+		}
+		return wp_get_ability( $name );
 	}
 
 	/**

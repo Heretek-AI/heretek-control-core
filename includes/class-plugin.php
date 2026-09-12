@@ -124,10 +124,11 @@ class EMCP_Tools_Plugin {
 		add_action( 'wp_abilities_api_categories_init', array( $this, 'register_category' ) );
 		add_action( 'wp_abilities_api_init', array( $this, 'register_abilities' ) );
 
-		// The Abilities API is lazy-loaded: wp_abilities_api_init fires on first
-		// wp_get_ability() call. The default MCP server's tool registration triggers
-		// this during mcp_adapter_init at priority 10. We hook at priority 20 so
-		// the Abilities API is initialized and our abilities are registered by then.
+		// The Abilities API is lazy-loaded: wp_abilities_api_init fires on the first
+		// abilities-API call (wp_get_ability()/wp_has_ability()). The default MCP
+		// server's tool registration triggers this during mcp_adapter_init at
+		// priority 10. We hook at priority 20 so the Abilities API is initialized
+		// and our abilities are registered by then.
 		add_action( 'mcp_adapter_init', array( $this, 'register_mcp_server' ), 20 );
 
 		// Apply the disabled-tools option from the admin settings page on every
@@ -294,9 +295,14 @@ class EMCP_Tools_Plugin {
 	 * @return string[]
 	 */
 	public function get_active_ability_names(): array {
-		if ( empty( $this->ability_names ) && function_exists( 'wp_get_ability' ) ) {
-			// Any known ability triggers wp_abilities_api_init → register_abilities().
-			wp_get_ability( 'emcp-tools/list-pages' );
+		if ( empty( $this->ability_names ) && function_exists( 'wp_has_ability' ) ) {
+			// Trigger the lazy Abilities API init (fires wp_abilities_api_init →
+			// register_abilities()). Use wp_has_ability() rather than wp_get_ability():
+			// both run the same init, but wp_get_ability() routes through
+			// WP_Abilities_Registry::get_registered(), which raises a "Ability not
+			// found" _doing_it_wrong() whenever the probed name is conditionally
+			// absent — e.g. Elementor-gated list-pages on a non-Elementor site.
+			wp_has_ability( 'emcp-tools/list-pages' );
 		}
 		return is_array( $this->ability_names ) ? $this->ability_names : array();
 	}
@@ -334,7 +340,7 @@ class EMCP_Tools_Plugin {
 			// Also expose WordPress core's read-only context abilities (site/user/
 			// environment info) on our server — registered by core, free to surface.
 			foreach ( array( 'core/get-site-info', 'core/get-user-info', 'core/get-environment-info' ) as $emcp_core_ability ) {
-				if ( function_exists( 'wp_get_ability' ) && wp_get_ability( $emcp_core_ability ) && ! in_array( $emcp_core_ability, $tools, true ) ) {
+				if ( function_exists( 'wp_has_ability' ) && wp_has_ability( $emcp_core_ability ) && ! in_array( $emcp_core_ability, $tools, true ) ) {
 					$tools[] = $emcp_core_ability;
 				}
 			}
