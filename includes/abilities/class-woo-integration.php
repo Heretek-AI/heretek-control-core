@@ -98,6 +98,7 @@ class EMCP_Tools_Woo_Integration {
 					'get-order'      => 'Get order by { order_id }',
 					'list-customers' => 'List registered customers { limit? }',
 					'list-coupons'   => 'List coupons { limit? }',
+					'list-vendors'   => 'List marketplace vendors / models { role?, limit? }',
 					'report-sales'   => 'Report sales { period?: "week"|"month"|"year" }',
 					'system-status'  => 'WooCommerce system health and environment status',
 				),
@@ -114,11 +115,16 @@ class EMCP_Tools_Woo_Integration {
 				);
 				$items = array();
 				foreach ( $posts as $p ) {
-					$items[] = array(
-						'id'    => $p->ID,
-						'name'  => $p->post_title,
-						'sku'   => get_post_meta( $p->ID, '_sku', true ),
-						'price' => get_post_meta( $p->ID, '_price', true ),
+					$thumb_id = (int) get_post_thumbnail_id( $p->ID );
+					$items[]  = array(
+						'id'             => (int) $p->ID,
+						'name'           => (string) $p->post_title,
+						'sku'            => (string) get_post_meta( $p->ID, '_sku', true ),
+						'price'          => (string) get_post_meta( $p->ID, '_price', true ),
+						'regular_price'  => (string) get_post_meta( $p->ID, '_regular_price', true ),
+						'author'         => (int) ( $p->post_author ?? 0 ),
+						'virtual'        => 'yes' === get_post_meta( $p->ID, '_virtual', true ),
+						'featured_image' => $thumb_id,
 					);
 				}
 				return array( 'products' => $items, 'total' => count( $items ) );
@@ -129,14 +135,39 @@ class EMCP_Tools_Woo_Integration {
 				if ( ! $p || 'product' !== $p->post_type ) {
 					return new WP_Error( 'not_found', __( 'Product not found.', 'emcp-tools' ) );
 				}
+				$thumb_id = (int) get_post_thumbnail_id( $p->ID );
 				return array(
-					'id'          => $p->ID,
-					'name'        => $p->post_title,
-					'description' => $p->post_content,
-					'sku'         => get_post_meta( $p->ID, '_sku', true ),
-					'price'       => get_post_meta( $p->ID, '_price', true ),
-					'stock'       => get_post_meta( $p->ID, '_stock', true ),
+					'id'            => (int) $p->ID,
+					'name'          => (string) $p->post_title,
+					'description'   => (string) $p->post_content,
+					'author'        => (int) ( $p->post_author ?? 0 ),
+					'status'        => (string) $p->post_status,
+					'sku'           => (string) get_post_meta( $p->ID, '_sku', true ),
+					'price'         => (string) get_post_meta( $p->ID, '_price', true ),
+					'regular_price' => (string) get_post_meta( $p->ID, '_regular_price', true ),
+					'sale_price'    => (string) get_post_meta( $p->ID, '_sale_price', true ),
+					'stock'         => get_post_meta( $p->ID, '_stock', true ),
+					'virtual'       => 'yes' === get_post_meta( $p->ID, '_virtual', true ),
+					'downloadable'  => 'yes' === get_post_meta( $p->ID, '_downloadable', true ),
+					'thumbnail_id'  => $thumb_id,
+					'permalink'     => (string) get_permalink( $id ),
 				);
+
+			case 'list-vendors':
+				$role  = sanitize_key( $in['role'] ?? 'wcfm_vendor' );
+				$users = get_users( array( 'role' => $role, 'number' => (int) ( $in['limit'] ?? 50 ) ) );
+				$vendors = array();
+				foreach ( $users as $u ) {
+					$store_settings = get_user_meta( $u->ID, 'wcfmmp_profile_settings', true );
+					$store_name     = is_array( $store_settings ) && ! empty( $store_settings['store_name'] ) ? $store_settings['store_name'] : $u->display_name;
+					$vendors[]      = array(
+						'id'         => (int) $u->ID,
+						'username'   => (string) $u->user_login,
+						'store_name' => (string) $store_name,
+						'email'      => (string) $u->user_email,
+					);
+				}
+				return array( 'vendors' => $vendors, 'total' => count( $vendors ) );
 
 			case 'list-orders':
 				$posts = get_posts(
@@ -199,41 +230,137 @@ class EMCP_Tools_Woo_Integration {
 
 		switch ( $op ) {
 			case 'create-product':
-				$title = sanitize_text_field( $in['name'] ?? 'New Product' );
-				$id    = wp_insert_post(
-					array(
-						'post_type'   => 'product',
-						'post_status' => 'publish',
-						'post_title'  => $title,
-						'post_content'=> (string) ( $in['description'] ?? '' ),
-					)
+				$title     = sanitize_text_field( $in['name'] ?? $in['title'] ?? 'New Product' );
+				$post_data = array(
+					'post_type'    => 'product',
+					'post_status'  => sanitize_key( $in['status'] ?? 'publish' ),
+					'post_title'   => $title,
+					'post_content' => (string) ( $in['description'] ?? $in['content'] ?? '' ),
 				);
+				if ( ! empty( $in['author'] ) || ! empty( $in['vendor_id'] ) ) {
+					$post_data['post_author'] = absint( $in['author'] ?? $in['vendor_id'] );
+				}
+				$id = wp_insert_post( $post_data );
 				if ( is_wp_error( $id ) ) {
 					return $id;
 				}
+
 				if ( isset( $in['price'] ) ) {
-					update_post_meta( $id, '_price', sanitize_text_field( $in['price'] ) );
-					update_post_meta( $id, '_regular_price', sanitize_text_field( $in['price'] ) );
+					update_post_meta( $id, '_price', sanitize_text_field( (string) $in['price'] ) );
+					update_post_meta( $id, '_regular_price', sanitize_text_field( (string) $in['price'] ) );
+				}
+				if ( isset( $in['regular_price'] ) ) {
+					update_post_meta( $id, '_regular_price', sanitize_text_field( (string) $in['regular_price'] ) );
+					if ( ! isset( $in['price'] ) ) {
+						update_post_meta( $id, '_price', sanitize_text_field( (string) $in['regular_price'] ) );
+					}
+				}
+				if ( isset( $in['sale_price'] ) ) {
+					update_post_meta( $id, '_sale_price', sanitize_text_field( (string) $in['sale_price'] ) );
+					if ( '' !== trim( (string) $in['sale_price'] ) ) {
+						update_post_meta( $id, '_price', sanitize_text_field( (string) $in['sale_price'] ) );
+					}
 				}
 				if ( isset( $in['sku'] ) ) {
-					update_post_meta( $id, '_sku', sanitize_text_field( $in['sku'] ) );
+					update_post_meta( $id, '_sku', sanitize_text_field( (string) $in['sku'] ) );
 				}
-				return array( 'success' => true, 'product_id' => $id );
+				if ( isset( $in['virtual'] ) ) {
+					$is_virtual = ( true === $in['virtual'] || 'yes' === $in['virtual'] || '1' === (string) $in['virtual'] ) ? 'yes' : 'no';
+					update_post_meta( $id, '_virtual', $is_virtual );
+				}
+				if ( isset( $in['downloadable'] ) ) {
+					$is_dl = ( true === $in['downloadable'] || 'yes' === $in['downloadable'] || '1' === (string) $in['downloadable'] ) ? 'yes' : 'no';
+					update_post_meta( $id, '_downloadable', $is_dl );
+				}
+				if ( ! empty( $in['featured_image'] ) || ! empty( $in['thumbnail_id'] ) ) {
+					$thumb_id = absint( $in['featured_image'] ?? $in['thumbnail_id'] );
+					if ( $thumb_id && function_exists( 'set_post_thumbnail' ) ) {
+						set_post_thumbnail( $id, $thumb_id );
+					}
+				}
+				if ( ! empty( $in['categories'] ) && function_exists( 'wp_set_object_terms' ) ) {
+					wp_set_object_terms( $id, (array) $in['categories'], 'product_cat' );
+				}
+				if ( ! empty( $in['tags'] ) && function_exists( 'wp_set_object_terms' ) ) {
+					wp_set_object_terms( $id, (array) $in['tags'], 'product_tag' );
+				}
+				if ( isset( $in['meta'] ) && is_array( $in['meta'] ) ) {
+					foreach ( $in['meta'] as $mk => $mv ) {
+						update_post_meta( $id, sanitize_key( $mk ), $mv );
+					}
+				}
+				return array(
+					'success'    => true,
+					'product_id' => $id,
+					'edit_link'  => admin_url( 'post.php?post=' . $id . '&action=edit' ),
+				);
 
 			case 'update-product':
 				$id = (int) ( $in['product_id'] ?? 0 );
 				if ( ! $id ) {
 					return new WP_Error( 'missing_id', __( 'product_id required.', 'emcp-tools' ) );
 				}
-				if ( isset( $in['name'] ) ) {
-					wp_update_post( array( 'ID' => $id, 'post_title' => sanitize_text_field( $in['name'] ) ) );
+				$post_update = array( 'ID' => $id );
+				if ( isset( $in['name'] ) || isset( $in['title'] ) ) {
+					$post_update['post_title'] = sanitize_text_field( $in['name'] ?? $in['title'] );
+				}
+				if ( isset( $in['description'] ) || isset( $in['content'] ) ) {
+					$post_update['post_content'] = (string) ( $in['description'] ?? $in['content'] );
+				}
+				if ( isset( $in['status'] ) ) {
+					$post_update['post_status'] = sanitize_key( $in['status'] );
+				}
+				if ( ! empty( $in['author'] ) || ! empty( $in['vendor_id'] ) ) {
+					$post_update['post_author'] = absint( $in['author'] ?? $in['vendor_id'] );
+				}
+				if ( count( $post_update ) > 1 ) {
+					wp_update_post( $post_update );
 				}
 				if ( isset( $in['price'] ) ) {
-					update_post_meta( $id, '_price', sanitize_text_field( $in['price'] ) );
-					update_post_meta( $id, '_regular_price', sanitize_text_field( $in['price'] ) );
+					update_post_meta( $id, '_price', sanitize_text_field( (string) $in['price'] ) );
+					update_post_meta( $id, '_regular_price', sanitize_text_field( (string) $in['price'] ) );
+				}
+				if ( isset( $in['regular_price'] ) ) {
+					update_post_meta( $id, '_regular_price', sanitize_text_field( (string) $in['regular_price'] ) );
+					if ( ! isset( $in['price'] ) ) {
+						update_post_meta( $id, '_price', sanitize_text_field( (string) $in['regular_price'] ) );
+					}
+				}
+				if ( isset( $in['sale_price'] ) ) {
+					update_post_meta( $id, '_sale_price', sanitize_text_field( (string) $in['sale_price'] ) );
+					if ( '' !== trim( (string) $in['sale_price'] ) ) {
+						update_post_meta( $id, '_price', sanitize_text_field( (string) $in['sale_price'] ) );
+					}
 				}
 				if ( isset( $in['sku'] ) ) {
-					update_post_meta( $id, '_sku', sanitize_text_field( $in['sku'] ) );
+					update_post_meta( $id, '_sku', sanitize_text_field( (string) $in['sku'] ) );
+				}
+				if ( isset( $in['virtual'] ) ) {
+					$is_virtual = ( true === $in['virtual'] || 'yes' === $in['virtual'] || '1' === (string) $in['virtual'] ) ? 'yes' : 'no';
+					update_post_meta( $id, '_virtual', $is_virtual );
+				}
+				if ( isset( $in['downloadable'] ) ) {
+					$is_dl = ( true === $in['downloadable'] || 'yes' === $in['downloadable'] || '1' === (string) $in['downloadable'] ) ? 'yes' : 'no';
+					update_post_meta( $id, '_downloadable', $is_dl );
+				}
+				if ( isset( $in['featured_image'] ) || isset( $in['thumbnail_id'] ) ) {
+					$thumb_id = absint( $in['featured_image'] ?? $in['thumbnail_id'] );
+					if ( $thumb_id && function_exists( 'set_post_thumbnail' ) ) {
+						set_post_thumbnail( $id, $thumb_id );
+					} elseif ( 0 === $thumb_id && function_exists( 'delete_post_thumbnail' ) ) {
+						delete_post_thumbnail( $id );
+					}
+				}
+				if ( isset( $in['categories'] ) && function_exists( 'wp_set_object_terms' ) ) {
+					wp_set_object_terms( $id, (array) $in['categories'], 'product_cat' );
+				}
+				if ( isset( $in['tags'] ) && function_exists( 'wp_set_object_terms' ) ) {
+					wp_set_object_terms( $id, (array) $in['tags'], 'product_tag' );
+				}
+				if ( isset( $in['meta'] ) && is_array( $in['meta'] ) ) {
+					foreach ( $in['meta'] as $mk => $mv ) {
+						update_post_meta( $id, sanitize_key( $mk ), $mv );
+					}
 				}
 				return array( 'success' => true, 'product_id' => $id );
 

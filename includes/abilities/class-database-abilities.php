@@ -92,10 +92,25 @@ class EMCP_Tools_Database_Abilities {
 	}
 
 	private function register_query(): void {
-		$this->ability( 'emcp-tools/query', __( 'Query (read-only)', 'emcp-tools' ), __( 'Run a read-only SQL query (SELECT/SHOW/DESCRIBE/EXPLAIN). Writes/DDL and file-access SQL are rejected. Results are capped.', 'emcp-tools' ), 'execute_query', array( 'sql' => array( 'type' => 'string' ), 'limit' => array( 'type' => 'integer' ) ), array( 'sql' ), true );
+		$this->ability(
+			'emcp-tools/query',
+			__( 'Query (read-only)', 'emcp-tools' ),
+			__( 'Run a read-only SQL query (SELECT/SHOW/DESCRIBE/EXPLAIN). Writes/DDL and file-access SQL are rejected. Results are capped.', 'emcp-tools' ),
+			'execute_query',
+			array(
+				'sql'   => array( 'type' => 'string', 'description' => __( 'The SQL query to run.', 'emcp-tools' ) ),
+				'query' => array( 'type' => 'string', 'description' => __( 'Alias for sql.', 'emcp-tools' ) ),
+				'limit' => array( 'type' => 'integer', 'description' => __( 'Maximum rows to return.', 'emcp-tools' ) ),
+			),
+			array(),
+			true
+		);
 	}
 	public function execute_query( $input ) {
-		$sql = (string) ( $input['sql'] ?? '' );
+		$sql = trim( (string) ( $input['sql'] ?? $input['query'] ?? '' ) );
+		if ( '' === $sql ) {
+			return new \WP_Error( 'missing_sql', __( 'A "sql" (or "query") parameter is required.', 'emcp-tools' ) );
+		}
 		$ro  = EMCP_Tools_Database_Guard::is_read_only_sql( $sql );
 		if ( is_wp_error( $ro ) ) {
 			return $ro;

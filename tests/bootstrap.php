@@ -43,6 +43,14 @@ function emcp_test_reset(): void {
 		'options_pages'      => array(),
 		'abilities'          => array(),   // name => registration args.
 		'options'            => array(),   // option name => value (get_option/update_option).
+		'users'              => array(),   // user_id => user object.
+		'usermeta'           => array(),   // user_id => [ key => val ].
+		'user_caps'          => array(),   // user_id => [ cap => bool ].
+		'roles'              => array(
+			'subscriber'    => (object) array( 'name' => 'Subscriber', 'capabilities' => array( 'read' => true ) ),
+			'wcfm_vendor'   => (object) array( 'name' => 'Vendor', 'capabilities' => array( 'read' => true, 'edit_posts' => true ) ),
+			'administrator' => (object) array( 'name' => 'Administrator', 'capabilities' => array( 'manage_options' => true, 'edit_users' => true ) ),
+		),
 		'cpt_tax_supported'  => true,      // Toggles the ACF 6.1+ CPT/tax API stubs.
 		'acf_post_types'     => array(),   // key/ID => acf-post-type definition.
 		'acf_taxonomies'     => array(),   // key/ID => acf-taxonomy definition.
@@ -51,6 +59,13 @@ function emcp_test_reset(): void {
 		'imported_types'     => array(),   // recorded acf_import_post_type() args.
 		'imported_taxes'     => array(),   // recorded acf_import_taxonomy() args.
 		'updated_internal'   => array(),   // recorded acf_update_internal_post_type() args.
+	);
+	$GLOBALS['wpdb'] = (object) array(
+		'prefix'   => 'wp_',
+		'users'    => 'wp_users',
+		'usermeta' => 'wp_usermeta',
+		'posts'    => 'wp_posts',
+		'postmeta' => 'wp_postmeta',
 	);
 }
 emcp_test_reset();
@@ -153,6 +168,79 @@ function get_post( $post_id ) {
 	return $GLOBALS['emcp_test']['posts'][ (int) $post_id ] ?? null;
 }
 
+if ( ! function_exists( 'wp_insert_post' ) ) {
+	function wp_insert_post( $postarr, $wp_error = false ) {
+		static $next_post_id = 500;
+		$id = ++$next_post_id;
+		$obj = new WP_Post( array_merge( array(
+			'ID'             => $id,
+			'post_title'     => $postarr['post_title'] ?? '',
+			'post_content'   => $postarr['post_content'] ?? '',
+			'post_status'    => $postarr['post_status'] ?? 'publish',
+			'post_type'      => $postarr['post_type'] ?? 'post',
+			'post_author'    => $postarr['post_author'] ?? 0,
+			'post_date'      => date( 'Y-m-d H:i:s' ),
+		), (array) $postarr ) );
+		$GLOBALS['emcp_test']['posts'][ $id ] = $obj;
+		return $id;
+	}
+}
+
+if ( ! function_exists( 'wp_update_post' ) ) {
+	function wp_update_post( $postarr, $wp_error = false ) {
+		$id = (int) ( is_array( $postarr ) ? ( $postarr['ID'] ?? 0 ) : ( $postarr->ID ?? 0 ) );
+		if ( ! isset( $GLOBALS['emcp_test']['posts'][ $id ] ) ) {
+			return 0;
+		}
+		$existing = (array) $GLOBALS['emcp_test']['posts'][ $id ];
+		$GLOBALS['emcp_test']['posts'][ $id ] = new WP_Post( array_merge( $existing, (array) $postarr ) );
+		return $id;
+	}
+}
+
+if ( ! function_exists( 'get_users' ) ) {
+	function get_users( $args = array() ) {
+		$role = $args['role'] ?? '';
+		$out = array();
+		foreach ( (array) ( $GLOBALS['emcp_test']['users'] ?? array() ) as $u ) {
+			if ( '' === $role || ( ! empty( $u->roles ) && in_array( $role, (array) $u->roles, true ) ) ) {
+				$out[] = $u;
+			}
+		}
+		return $out;
+	}
+}
+
+if ( ! function_exists( 'get_post_meta' ) ) {
+	function get_post_meta( $post_id, $key = '', $single = false ) {
+		$post_id = (int) $post_id;
+		$store   = $GLOBALS['emcp_test']['postmeta'][ $post_id ] ?? array();
+		if ( '' === $key ) {
+			$out = array();
+			foreach ( $store as $k => $v ) {
+				$out[ $k ] = (array) $v;
+			}
+			return $out;
+		}
+		if ( ! isset( $store[ $key ] ) ) {
+			return $single ? '' : array();
+		}
+		$val = $store[ $key ];
+		return $single ? $val : (array) $val;
+	}
+}
+
+if ( ! function_exists( 'update_post_meta' ) ) {
+	function update_post_meta( $post_id, $key, $value ) {
+		$post_id = (int) $post_id;
+		if ( ! isset( $GLOBALS['emcp_test']['postmeta'][ $post_id ] ) ) {
+			$GLOBALS['emcp_test']['postmeta'][ $post_id ] = array();
+		}
+		$GLOBALS['emcp_test']['postmeta'][ $post_id ][ $key ] = $value;
+		return true;
+	}
+}
+
 if ( ! function_exists( 'delete_post_meta' ) ) {
 	// Records deletions in $GLOBALS['emcp_test']['deleted_meta'] as [post_id, key].
 	function delete_post_meta( $post_id, $key, $value = '' ) {
@@ -163,6 +251,37 @@ if ( ! function_exists( 'delete_post_meta' ) ) {
 
 function get_permalink( $post = null ): string {
 	return 'http://example.test/?p=' . ( is_object( $post ) ? (int) $post->ID : (int) $post );
+}
+
+if ( ! function_exists( 'get_object_taxonomies' ) ) {
+	function get_object_taxonomies( $object, $output = 'names' ) {
+		return array( 'category', 'post_tag' );
+	}
+}
+
+if ( ! function_exists( 'get_the_terms' ) ) {
+	function get_the_terms( $post, $taxonomy ) {
+		return false;
+	}
+}
+
+if ( ! function_exists( 'get_post_thumbnail_id' ) ) {
+	function get_post_thumbnail_id( $post = null ) {
+		$post_id = is_object( $post ) ? (int) ( $post->ID ?? 0 ) : (int) $post;
+		return (int) get_post_meta( $post_id, '_thumbnail_id', true );
+	}
+}
+
+if ( ! function_exists( 'wp_get_attachment_image_url' ) ) {
+	function wp_get_attachment_image_url( $attachment_id, $size = 'thumbnail', $icon = false ) {
+		return $attachment_id ? "https://example.com/wp-content/uploads/{$attachment_id}.jpg" : false;
+	}
+}
+
+if ( ! function_exists( 'is_protected_meta' ) ) {
+	function is_protected_meta( $meta_key, $meta_type = null ) {
+		return '_' === substr( (string) $meta_key, 0, 1 );
+	}
 }
 
 function admin_url( $path = '' ): string {
@@ -196,6 +315,158 @@ function url_to_postid( $url ) {
 // Fixture-driven: $GLOBALS['emcp_test']['post_status'][ id ] => 'publish'|'trash'|...
 function get_post_status( $id ) {
 	return $GLOBALS['emcp_test']['post_status'][ (int) $id ] ?? false;
+}
+
+// ---------------------------------------------------------------------------
+// WordPress User and Meta stubs (fixture-driven)
+// ---------------------------------------------------------------------------
+
+if ( ! function_exists( 'get_userdata' ) ) {
+	function get_userdata( $id ) {
+		$u = $GLOBALS['emcp_test']['users'][ (int) $id ] ?? null;
+		return $u ? ( is_object( $u ) ? $u : (object) $u ) : false;
+	}
+}
+
+if ( ! function_exists( 'get_user_meta' ) ) {
+	function get_user_meta( $user_id, $key = '', $single = false ) {
+		$user_id = (int) $user_id;
+		$store   = $GLOBALS['emcp_test']['usermeta'][ $user_id ] ?? array();
+		if ( '' === $key ) {
+			$out = array();
+			foreach ( $store as $k => $v ) {
+				$out[ $k ] = (array) $v;
+			}
+			return $out;
+		}
+		if ( ! isset( $store[ $key ] ) ) {
+			return $single ? '' : array();
+		}
+		$val = $store[ $key ];
+		return $single ? $val : (array) $val;
+	}
+}
+
+if ( ! function_exists( 'update_user_meta' ) ) {
+	function update_user_meta( $user_id, $key, $value ) {
+		$user_id = (int) $user_id;
+		if ( ! isset( $GLOBALS['emcp_test']['usermeta'][ $user_id ] ) ) {
+			$GLOBALS['emcp_test']['usermeta'][ $user_id ] = array();
+		}
+		$GLOBALS['emcp_test']['usermeta'][ $user_id ][ $key ] = $value;
+		return true;
+	}
+}
+
+if ( ! function_exists( 'wp_insert_user' ) ) {
+	function wp_insert_user( $userdata ) {
+		static $next_id = 100;
+		$id = ++$next_id;
+		$obj = (object) array_merge( array(
+			'ID'              => $id,
+			'user_login'      => $userdata['user_login'] ?? '',
+			'user_email'      => $userdata['user_email'] ?? '',
+			'display_name'    => $userdata['display_name'] ?? $userdata['user_login'] ?? '',
+			'first_name'      => $userdata['first_name'] ?? '',
+			'last_name'       => $userdata['last_name'] ?? '',
+			'user_url'        => $userdata['user_url'] ?? '',
+			'description'     => $userdata['description'] ?? '',
+			'roles'           => array( $userdata['role'] ?? 'subscriber' ),
+			'user_registered' => date( 'Y-m-d H:i:s' ),
+		), (array) $userdata );
+		$GLOBALS['emcp_test']['users'][ $id ] = $obj;
+		return $id;
+	}
+}
+
+if ( ! function_exists( 'wp_update_user' ) ) {
+	function wp_update_user( $userdata ) {
+		$id = (int) ( is_array( $userdata ) ? ( $userdata['ID'] ?? 0 ) : ( $userdata->ID ?? 0 ) );
+		if ( ! isset( $GLOBALS['emcp_test']['users'][ $id ] ) ) {
+			return new WP_Error( 'invalid_user_id', 'User not found' );
+		}
+		$curr = (array) $GLOBALS['emcp_test']['users'][ $id ];
+		$GLOBALS['emcp_test']['users'][ $id ] = (object) array_merge( $curr, (array) $userdata );
+		return $id;
+	}
+}
+
+if ( ! function_exists( 'user_can' ) ) {
+	function user_can( $user, $capability ) {
+		$user_id = is_object( $user ) ? (int) ( $user->ID ?? 0 ) : (int) $user;
+		if ( isset( $GLOBALS['emcp_test']['user_caps'][ $user_id ][ $capability ] ) ) {
+			return (bool) $GLOBALS['emcp_test']['user_caps'][ $user_id ][ $capability ];
+		}
+		$u = $GLOBALS['emcp_test']['users'][ $user_id ] ?? null;
+		if ( $u && ! empty( $u->roles ) && in_array( 'administrator', (array) $u->roles, true ) ) {
+			return true;
+		}
+		return false;
+	}
+}
+
+if ( ! function_exists( 'get_role' ) ) {
+	function get_role( $role ) {
+		return $GLOBALS['emcp_test']['roles'][ $role ] ?? null;
+	}
+}
+
+if ( ! function_exists( 'sanitize_user' ) ) {
+	function sanitize_user( $username, $strict = false ) {
+		return preg_replace( '/[^a-zA-Z0-9_\-\.]/', '', (string) $username );
+	}
+}
+
+if ( ! function_exists( 'sanitize_email' ) ) {
+	function sanitize_email( $email ) {
+		return filter_var( (string) $email, FILTER_SANITIZE_EMAIL ) ?: '';
+	}
+}
+
+if ( ! function_exists( 'is_email' ) ) {
+	function is_email( $email ) {
+		return (bool) filter_var( (string) $email, FILTER_VALIDATE_EMAIL );
+	}
+}
+
+if ( ! function_exists( 'wp_generate_password' ) ) {
+	function wp_generate_password( $length = 12, $special_chars = true, $extra_special_chars = false ) {
+		return bin2hex( random_bytes( max( 1, (int) ( $length / 2 ) ) ) );
+	}
+}
+
+if ( ! function_exists( 'maybe_unserialize' ) ) {
+	function maybe_unserialize( $original ) {
+		if ( is_string( $original ) && is_serialized( $original ) ) {
+			return @unserialize( $original );
+		}
+		return $original;
+	}
+}
+
+if ( ! function_exists( 'is_serialized' ) ) {
+	function is_serialized( $data, $strict = true ) {
+		if ( ! is_string( $data ) ) {
+			return false;
+		}
+		$data = trim( $data );
+		if ( 'N;' === $data ) {
+			return true;
+		}
+		if ( strlen( $data ) < 4 ) {
+			return false;
+		}
+		if ( ':' !== $data[1] ) {
+			return false;
+		}
+		return true;
+	}
+}
+
+if ( ! function_exists( 'count_user_posts' ) ) {
+	function count_user_posts( $userid, $post_type = 'post', $public_only = false ) {
+		return 0;
+	}
 }
 
 // ---------------------------------------------------------------------------

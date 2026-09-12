@@ -97,6 +97,37 @@ class EMCP_Tools_User_Abilities {
 		return false;
 	}
 
+	/**
+	 * Checks whether a user meta key is forbidden (privilege escalation, auth secrets, roles).
+	 *
+	 * @since 3.4.3
+	 * @param string $key
+	 * @return bool
+	 */
+	public static function is_forbidden_user_meta_key( string $key ): bool {
+		$lower = strtolower( trim( $key ) );
+		if ( '' === $lower ) {
+			return true;
+		}
+		$forbidden_exact = array(
+			'capabilities',
+			'user_level',
+			'session_tokens',
+			'wp_user_level',
+			'default_password_nag',
+			'account_status',
+		);
+		if ( in_array( $lower, $forbidden_exact, true ) ) {
+			return true;
+		}
+		if ( preg_match( '/(^|_)capabilities$/i', $lower ) ||
+		     preg_match( '/(^|_)user_level$/i', $lower ) ||
+		     preg_match( '/(pass|token|secret|auth|nonce|activation|digest)/i', $lower ) ) {
+			return true;
+		}
+		return false;
+	}
+
 	// -------------------------------------------------------------------
 	// list-users
 	// -------------------------------------------------------------------
@@ -203,7 +234,10 @@ class EMCP_Tools_User_Abilities {
 				'permission_callback' => array( $this, 'can_list' ),
 				'input_schema'        => array(
 					'type'       => 'object',
-					'properties' => array( 'id' => array( 'type' => 'integer', 'description' => __( 'User ID.', 'emcp-tools' ) ) ),
+					'properties' => array(
+						'id'           => array( 'type' => 'integer', 'description' => __( 'User ID.', 'emcp-tools' ) ),
+						'include_meta' => array( 'type' => 'boolean', 'description' => __( 'Whether to include safe user metadata. Default: false.', 'emcp-tools' ) ),
+					),
 					'required'   => array( 'id' ),
 				),
 				'output_schema'       => array( 'type' => 'object', 'properties' => array(
@@ -214,6 +248,7 @@ class EMCP_Tools_User_Abilities {
 					'description' => array( 'type' => 'string' ), 'roles' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					'registered' => array( 'type' => 'string' ), 'post_count' => array( 'type' => 'integer' ),
 					'is_admin' => array( 'type' => 'boolean' ),
+					'meta' => array( 'type' => 'object' ),
 				) ),
 				'meta'                => array( 'annotations' => array( 'readonly' => true, 'destructive' => false, 'idempotent' => true ), 'show_in_rest' => true ),
 			)
@@ -233,6 +268,21 @@ class EMCP_Tools_User_Abilities {
 		if ( ! $u ) {
 			return new \WP_Error( 'user_not_found', __( 'User not found.', 'emcp-tools' ) );
 		}
+
+		$meta = array();
+		if ( ! empty( $input['include_meta'] ) && function_exists( 'get_user_meta' ) ) {
+			$raw_meta = get_user_meta( $id );
+			if ( is_array( $raw_meta ) ) {
+				foreach ( $raw_meta as $mk => $mvals ) {
+					$mk = (string) $mk;
+					if ( self::is_forbidden_user_meta_key( $mk ) ) {
+						continue;
+					}
+					$meta[ $mk ] = is_array( $mvals ) && 1 === count( $mvals ) ? maybe_unserialize( $mvals[0] ) : array_map( 'maybe_unserialize', (array) $mvals );
+				}
+			}
+		}
+
 		return array(
 			'id'           => (int) $u->ID,
 			'username'     => (string) ( $u->user_login ?? '' ),
@@ -247,6 +297,7 @@ class EMCP_Tools_User_Abilities {
 			'registered'   => (string) ( $u->user_registered ?? '' ),
 			'post_count'   => function_exists( 'count_user_posts' ) ? (int) count_user_posts( $id ) : 0,
 			'is_admin'     => $this->user_has_admin_caps( $id ),
+			'meta'         => ! empty( $meta ) ? $meta : (object) array(),
 		);
 	}
 
@@ -275,6 +326,7 @@ class EMCP_Tools_User_Abilities {
 						'display_name' => array( 'type' => 'string' ),
 						'url'          => array( 'type' => 'string' ),
 						'description'  => array( 'type' => 'string' ),
+						'meta'         => array( 'type' => 'object', 'description' => __( 'Optional key-value pairs of user meta to save.', 'emcp-tools' ) ),
 					),
 					'required'   => array( 'username', 'email' ),
 				),
@@ -340,6 +392,16 @@ class EMCP_Tools_User_Abilities {
 		}
 		$user_id = (int) $user_id;
 
+		if ( isset( $input['meta'] ) && is_array( $input['meta'] ) && function_exists( 'update_user_meta' ) ) {
+			foreach ( $input['meta'] as $m_key => $m_val ) {
+				$m_key = sanitize_key( $m_key );
+				if ( self::is_forbidden_user_meta_key( $m_key ) ) {
+					continue;
+				}
+				update_user_meta( $user_id, $m_key, $m_val );
+			}
+		}
+
 		// Email the new user a set-password link. The password is NEVER returned.
 		if ( function_exists( 'wp_send_new_user_notifications' ) ) {
 			wp_send_new_user_notifications( $user_id, 'user' );
@@ -387,6 +449,7 @@ class EMCP_Tools_User_Abilities {
 						'nickname'     => array( 'type' => 'string' ),
 						'url'          => array( 'type' => 'string' ),
 						'description'  => array( 'type' => 'string' ),
+						'meta'         => array( 'type' => 'object', 'description' => __( 'Key-value pairs of user meta to save or update.', 'emcp-tools' ) ),
 					),
 					'required'   => array( 'id' ),
 				),
@@ -441,6 +504,22 @@ class EMCP_Tools_User_Abilities {
 			}
 			$userdata['user_email'] = $email;
 			$updated[]              = 'email';
+		}
+
+		// Apply safe user metadata updates.
+		if ( isset( $input['meta'] ) && is_array( $input['meta'] ) && function_exists( 'update_user_meta' ) ) {
+			$meta_updated = false;
+			foreach ( $input['meta'] as $m_key => $m_val ) {
+				$m_key = sanitize_key( $m_key );
+				if ( self::is_forbidden_user_meta_key( $m_key ) ) {
+					continue;
+				}
+				update_user_meta( $id, $m_key, $m_val );
+				$meta_updated = true;
+			}
+			if ( $meta_updated ) {
+				$updated[] = 'meta';
+			}
 		}
 
 		// Capture prior values of exactly the fields being changed, for rollback.

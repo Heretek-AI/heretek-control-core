@@ -195,18 +195,24 @@ class EMCP_Tools_Schema_Compat {
 		// runs. Picking the first non-null entry is the documented "lossy" way to
 		// express the union without losing the schema altogether. Callers that need
 		// both types should coerce at the executor (see `set-post-terms`).
+		// When 'string' is in a non-null union (e.g. ['integer', 'string']), prefer
+		// 'string' so term names and identifiers are both accepted without validator rejection.
 		if ( isset( $schema['type'] ) && is_array( $schema['type'] ) ) {
-			$flattened = null;
-			foreach ( $schema['type'] as $candidate ) {
-				if ( is_string( $candidate ) && 'null' !== $candidate ) {
-					$flattened = $candidate;
-					break;
+			if ( in_array( 'string', $schema['type'], true ) && ! in_array( 'null', $schema['type'], true ) ) {
+				$schema['type'] = 'string';
+			} else {
+				$flattened = null;
+				foreach ( $schema['type'] as $candidate ) {
+					if ( is_string( $candidate ) && 'null' !== $candidate ) {
+						$flattened = $candidate;
+						break;
+					}
 				}
+				if ( null === $flattened ) {
+					$flattened = 'string';
+				}
+				$schema['type'] = $flattened;
 			}
-			if ( null === $flattened ) {
-				$flattened = 'string';
-			}
-			$schema['type'] = $flattened;
 		}
 
 		if ( isset( $schema['properties'] ) && is_array( $schema['properties'] ) ) {

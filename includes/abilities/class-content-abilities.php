@@ -275,13 +275,59 @@ class EMCP_Tools_Content_Abilities {
 	}
 
 	/**
+	 * Safe protected meta keys permitted for e-commerce, paywalls, and standard publishing.
+	 *
+	 * @since 3.4.3
+	 * @return string[]
+	 */
+	public static function get_allowed_protected_meta(): array {
+		$default = array(
+			// WooCommerce Product Pricing & Inventory
+			'_price',
+			'_regular_price',
+			'_sale_price',
+			'_sale_price_dates_from',
+			'_sale_price_dates_to',
+			'_virtual',
+			'_downloadable',
+			'_sku',
+			'_stock_status',
+			'_stock',
+			'_manage_stock',
+			'_backorders',
+			'_sold_individually',
+			'_tax_status',
+			'_tax_class',
+			'_purchase_note',
+			'_featured',
+			'_weight',
+			'_length',
+			'_width',
+			'_height',
+			'_product_url',
+			'_button_text',
+			'_thumbnail_id',
+			'_product_image_gallery',
+			// Paywalls, Subscriptions, and Access
+			'_pay_per_post_price',
+			'_ppp_price',
+			'_ppp_enable',
+			'_wcs_subscription_period',
+			'_wcs_subscription_period_interval',
+			// Display & Template
+			'_wp_page_template',
+		);
+		return (array) apply_filters( 'emcp_tools_content_allowed_protected_meta', $default );
+	}
+
+	/**
 	 * Validate a meta map against the protected-meta guard.
 	 *
 	 * @param array $meta
 	 * @return true|\WP_Error
 	 */
 	private function reject_protected_meta( array $meta ) {
-		$allowed = (array) apply_filters( 'emcp_tools_content_allowed_protected_meta', array() );
+		$allowed = self::get_allowed_protected_meta();
 		foreach ( array_keys( $meta ) as $key ) {
 			$key = (string) $key;
 			if ( in_array( $key, $allowed, true ) ) {
@@ -541,7 +587,14 @@ class EMCP_Tools_Content_Abilities {
 					'permalink' => array( 'type' => 'string' ),
 					'edit_link' => array( 'type' => 'string' ), 'author' => array( 'type' => 'object' ),
 					'terms' => array( 'type' => 'object' ), 'meta' => array( 'type' => 'object' ),
-					'featured_image' => array( 'type' => array( 'object', 'null' ) ),
+					'featured_image' => array(
+						'type'       => 'object',
+						'properties' => array(
+							'id'  => array( 'type' => 'integer' ),
+							'url' => array( 'type' => 'string' ),
+							'alt' => array( 'type' => 'string' ),
+						),
+					),
 					'is_elementor' => array( 'type' => 'boolean' ),
 				) ),
 				'meta'                => array(
@@ -591,7 +644,7 @@ class EMCP_Tools_Content_Abilities {
 		$meta_raw = get_post_meta( $post_id );
 		$meta     = array();
 		if ( is_array( $meta_raw ) ) {
-			$allowed = (array) apply_filters( 'emcp_tools_content_allowed_protected_meta', array() );
+			$allowed = self::get_allowed_protected_meta();
 			foreach ( $meta_raw as $key => $vals ) {
 				$key = (string) $key;
 				if ( ! in_array( $key, $allowed, true ) && ( '_' === substr( $key, 0, 1 ) || is_protected_meta( $key, 'post' ) ) ) {
@@ -606,7 +659,11 @@ class EMCP_Tools_Content_Abilities {
 			'id'  => $thumb_id,
 			'url' => (string) wp_get_attachment_image_url( $thumb_id, 'full' ),
 			'alt' => (string) get_post_meta( $thumb_id, '_wp_attachment_image_alt', true ),
-		) : null;
+		) : array(
+			'id'  => 0,
+			'url' => '',
+			'alt' => '',
+		);
 
 		$author_id  = (int) ( $post->post_author ?? 0 );
 		$author_obj = $author_id ? get_userdata( $author_id ) : null;
