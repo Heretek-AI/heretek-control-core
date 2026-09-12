@@ -63,10 +63,10 @@ jobs:
         if: ${{ inputs.dry_run }}
         run: |
           NEW_VER="${{ steps.bump.outputs.version }}"
-          git archive --worktree-attributes --format=zip --prefix=elementor-mcp/ HEAD -o "elementor-mcp-${NEW_VER}.zip"
-          cp "elementor-mcp-${NEW_VER}.zip" "emcp-tools-${NEW_VER}.zip"
+          git archive --worktree-attributes --format=zip --prefix=heretek-control-core/ HEAD -o "heretek-control-core-${NEW_VER}.zip"
+          cp "heretek-control-core-${NEW_VER}.zip" "emcp-tools-${NEW_VER}.zip"
           echo "Archive built successfully in dry-run mode:"
-          unzip -l "elementor-mcp-${NEW_VER}.zip" | head -n 35
+          unzip -l "heretek-control-core-${NEW_VER}.zip" | head -n 35
 
       - name: Commit & Tag Version Bump
         if: ${{ !inputs.dry_run }}
@@ -83,10 +83,10 @@ jobs:
         run: |
           NEW_VER="${{ steps.bump.outputs.version }}"
           TAG="${{ steps.bump.outputs.tag }}"
-          git archive --format=zip --prefix=elementor-mcp/ "$TAG" -o "elementor-mcp-${NEW_VER}.zip"
-          cp "elementor-mcp-${NEW_VER}.zip" "emcp-tools-${NEW_VER}.zip"
+          git archive --format=zip --prefix=heretek-control-core/ "$TAG" -o "heretek-control-core-${NEW_VER}.zip"
+          cp "heretek-control-core-${NEW_VER}.zip" "emcp-tools-${NEW_VER}.zip"
           echo "Archive built successfully:"
-          unzip -l "elementor-mcp-${NEW_VER}.zip" | head -n 35
+          unzip -l "heretek-control-core-${NEW_VER}.zip" | head -n 35
 
       - name: Push Commit and Tag
         if: ${{ !inputs.dry_run }}
@@ -103,7 +103,7 @@ jobs:
           NEW_VER="${{ steps.bump.outputs.version }}"
           TAG="${{ steps.bump.outputs.tag }}"
           gh release create "$TAG" \
-            "elementor-mcp-${NEW_VER}.zip" \
+            "heretek-control-core-${NEW_VER}.zip" \
             "emcp-tools-${NEW_VER}.zip" \
             --title "$TAG" \
             --generate-notes

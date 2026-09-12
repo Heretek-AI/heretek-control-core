@@ -38,6 +38,20 @@ if ( ! function_exists( 'emcp_tools_retire_sibling' ) ) {
 	 * @param string $basename Plugin basename to deactivate.
 	 */
 	function emcp_tools_retire_sibling( $basename ) {
+		// NEVER retire ourselves. The free/premium folder names this plugin
+		// defines are also the folder names it is legitimately installed under,
+		// so a build whose basename matches one of them deactivated ITSELF on the
+		// next admin_init and vanished the instant it was activated. Guarded here
+		// as well as at the call sites: this is the difference between resolving
+		// a sibling conflict and committing suicide.
+		$emcp_tools_self = defined( 'EMCP_TOOLS_BASENAME' )
+			? EMCP_TOOLS_BASENAME
+			: plugin_basename( __FILE__ );
+
+		if ( ! is_string( $basename ) || '' === $basename || $basename === $emcp_tools_self ) {
+			return;
+		}
+
 		add_action(
 			'admin_init',
 			function () use ( $basename ) {
@@ -56,21 +70,76 @@ if ( ! function_exists( 'emcp_tools_retire_sibling' ) ) {
 	}
 }
 
+/*
+ * This plugin's own admin URL must ALWAYS resolve.
+ *
+ * The `emcp-tools` page is registered only when the full bootstrap succeeds. If
+ * it does not — a missing dependency, an admin class that loaded but declared
+ * nothing, or a host malware scanner that quarantines a file by ZEROING it in
+ * place so require_once succeeds silently (issue #100) — then nothing owns the
+ * slug and WordPress core ends the request from wp-admin/includes/menu.php with:
+ *
+ *     wp_die( 'Sorry, you are not allowed to access this page.', 403 );
+ *
+ * Every link into the plugin then dead-ends with no explanation, and the
+ * post-activation redirect lands on exactly that URL. Registering a fallback
+ * diagnostics page for the slug turns that 403 into a readable cause. It is a
+ * no-op whenever the real menu is registered, so it is safe to arm this before
+ * any of the bail-outs below.
+ */
+if ( is_admin() && ! class_exists( 'EMCP_Tools_Admin_Fallback' ) ) {
+	require_once __DIR__ . '/includes/admin/class-admin-fallback.php';
+	EMCP_Tools_Admin_Fallback::init();
+}
+
 $emcp_tools_is_premium_build = file_exists( __DIR__ . '/.emcp-pro' );
+$emcp_tools_dir_slug         = basename( __DIR__ );
 $emcp_tools_free_basename    = 'heretek-control-core/heretek-control-core.php';
 $emcp_tools_premium_basename = 'emcp-pro/emcp-tools.php';
 
-// Retire legacy folder activations if active
+/*
+ * Basenames of OTHER folders that may hold a second copy of this plugin.
+ * Anything inside our own folder is dropped: that is this very plugin (loaded
+ * twice it is deduplicated by require_once), and retiring it would only ever
+ * switch the site's single working copy off. Only another folder holds a real
+ * second copy, which would register the MCP server twice.
+ */
+$emcp_tools_other_folders_only = static function ( array $basenames ) use ( $emcp_tools_dir_slug ) {
+	return array_values(
+		array_filter(
+			array_unique( $basenames ),
+			static function ( $basename ) use ( $emcp_tools_dir_slug ) {
+				return 0 !== strpos( (string) $basename, $emcp_tools_dir_slug . '/' );
+			}
+		)
+	);
+};
+
+// Legacy folders / older names of this plugin — retired whichever build runs.
+$emcp_tools_legacy_basenames = $emcp_tools_other_folders_only(
+	array(
+		'emcp-tools/emcp-tools.php',            // Upstream free build.
+		'emcp-tools/heretek-control-core.php',  // This fork installed under upstream's folder name.
+		'elementor-mcp/emcp-tools.php',         // v2 folder name.
+		'elementor-mcp/elementor-mcp.php',      // v1 folder name.
+	)
+);
+
+// The free build — retired only BY a premium build (which takes precedence).
+$emcp_tools_free_basenames = $emcp_tools_other_folders_only( array( $emcp_tools_free_basename ) );
+
 if ( function_exists( 'emcp_tools_retire_sibling' ) ) {
-	emcp_tools_retire_sibling( 'emcp-tools/emcp-tools.php' );
-	emcp_tools_retire_sibling( 'elementor-mcp/emcp-tools.php' );
-	emcp_tools_retire_sibling( 'elementor-mcp/elementor-mcp.php' );
+	foreach ( $emcp_tools_legacy_basenames as $emcp_tools_sibling ) {
+		emcp_tools_retire_sibling( $emcp_tools_sibling );
+	}
 }
 
 // Last-resort redeclare net: another copy already booted this request.
 if ( defined( 'EMCP_TOOLS_VERSION' ) ) {
 	if ( $emcp_tools_is_premium_build ) {
-		emcp_tools_retire_sibling( $emcp_tools_free_basename );
+		foreach ( $emcp_tools_free_basenames as $emcp_tools_free_sibling ) {
+			emcp_tools_retire_sibling( $emcp_tools_free_sibling );
+		}
 	}
 	return;
 }
@@ -101,7 +170,9 @@ if ( ! $emcp_tools_is_premium_build ) {
 
 // The premium build retires an active free sibling.
 if ( $emcp_tools_is_premium_build ) {
-	emcp_tools_retire_sibling( $emcp_tools_free_basename );
+	foreach ( $emcp_tools_free_basenames as $emcp_tools_free_sibling ) {
+		emcp_tools_retire_sibling( $emcp_tools_free_sibling );
+	}
 	add_action(
 		'admin_notices',
 		function () {
@@ -197,6 +268,34 @@ if ( ! function_exists( 'emcp_tools_fs' ) ) {
 
 		emcp_tools_fs();
 		do_action( 'emcp_tools_fs_loaded' );
+
+		/*
+		 * This build answers Freemius's licensing questions itself — the bundled
+		 * SDK's is_premium()/can_use_premium_code() are hard-wired to true — so
+		 * the SDK must not own the admin UX:
+		 *
+		 *  - `_prepare_admin_menu` swaps the render callback of our own
+		 *    `emcp-tools` page for its opt-in/connect screen while the site has
+		 *    never been connected (`is_activation_mode()`), hiding the plugin's
+		 *    real screens;
+		 *  - its post-activation redirect sends the admin to
+		 *    admin.php?page=emcp-tools, a URL that exists only if this plugin
+		 *    finished booting — the dead end in the activation bug report.
+		 *
+		 * Both exist to sell a license this fork doesn't use, so both are
+		 * dropped. Nothing else depends on them: every licensing answer is
+		 * already hard-coded.
+		 */
+		if ( defined( 'WP_FS__LOWEST_PRIORITY' ) ) {
+			$emcp_tools_fs_instance = emcp_tools_fs();
+
+			if ( is_object( $emcp_tools_fs_instance ) && method_exists( $emcp_tools_fs_instance, '_prepare_admin_menu' ) ) {
+				remove_action( 'admin_menu', array( $emcp_tools_fs_instance, '_prepare_admin_menu' ), WP_FS__LOWEST_PRIORITY );
+				remove_action( 'network_admin_menu', array( $emcp_tools_fs_instance, '_prepare_admin_menu' ), WP_FS__LOWEST_PRIORITY );
+			}
+		}
+
+		emcp_tools_fs()->add_filter( 'redirect_on_activation', '__return_false' );
 
 		if ( is_admin() ) {
 			add_action(
