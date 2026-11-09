@@ -109,7 +109,7 @@ class EMCP_Tools_Themer_Metabox {
 		// PHP-template picker: rebuild its option list client-side whenever the type
 		// select changes (server-side it's only correct for the saved type — a new
 		// template starts with no type, so the dropdown must react live).
-		if ( class_exists( 'EMCP_Tools_Themer_PHP' ) && EMCP_Tools_Themer_PHP::enabled() ) {
+		if ( class_exists( 'EMCP_Tools_Themer_PHP' ) && EMCP_Tools_Themer_PHP::enabled() && EMCP_Tools_Themer_PHP_Store::can_edit() ) {
 			$templates = array();
 			foreach ( EMCP_Tools_Themer_PHP_Store::list_templates() as $tpl ) {
 				$templates[] = array( 'id' => (int) $tpl['template_id'], 'title' => (string) $tpl['title'], 'type' => (string) $tpl['type'] );
@@ -120,7 +120,7 @@ class EMCP_Tools_Themer_Metabox {
 				array(
 					'templates' => $templates,
 					'i18n'      => array(
-						'none'       => __( ', None (use builder content) , ', 'emcp-tools' ),
+						'none'       => __( 'None (use builder content)', 'emcp-tools' ),
 						'chooseType' => __( 'Choose a template type first to list matching PHP templates.', 'emcp-tools' ),
 						'noMatch'    => __( 'No PHP templates match this type yet. Ask your AI agent to create one.', 'emcp-tools' ),
 					),
@@ -183,16 +183,9 @@ JS;
 		$cond = get_post_meta( $post->ID, '_emcp_themer_conditions', true );
 		$cond = is_array( $cond ) ? $cond : array( 'include' => array(), 'exclude' => array(), 'priority' => 0 );
 
-		$type_labels = array(
-			'header'  => __( 'Header', 'emcp-tools' ),
-			'footer'  => __( 'Footer', 'emcp-tools' ),
-			'single'  => __( 'Single (post/page)', 'emcp-tools' ),
-			'archive' => __( 'Archive', 'emcp-tools' ),
-			'search'  => __( 'Search results', 'emcp-tools' ),
-			'404'     => __( '404 (not found)', 'emcp-tools' ),
-		);
+		$type_labels = EMCP_Tools_Themer_CPT::type_labels();
 
-		$php_enabled = class_exists( 'EMCP_Tools_Themer_PHP' ) && EMCP_Tools_Themer_PHP::enabled();
+		$php_enabled = class_exists( 'EMCP_Tools_Themer_PHP' ) && EMCP_Tools_Themer_PHP::enabled() && EMCP_Tools_Themer_PHP_Store::can_edit();
 
 		// Template type + (optional) PHP-template override, side by side in one row.
 		echo '<div class="emcp-themer-field-row" style="display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start;margin:0 0 4px;">';
@@ -201,7 +194,7 @@ JS;
 		echo '<div class="emcp-themer-field" style="flex:1 1 260px;min-width:240px;">';
 		echo '<p style="margin-top:0;"><label for="emcp-themer-type"><strong>' . esc_html__( 'Template type', 'emcp-tools' ) . '</strong> <span style="color:#d63638">*</span></label><br>';
 		echo '<select id="emcp-themer-type" name="emcp_themer_type" class="emcp-themer-type-select" required style="width:100%;max-width:340px;">';
-		printf( '<option value="" %s>%s</option>', selected( $type, '', false ), esc_html__( ', Choose a template type , ', 'emcp-tools' ) );
+		printf( '<option value="" %s>%s</option>', selected( $type, '', false ), esc_html__( 'Choose a template type', 'emcp-tools' ) );
 		foreach ( EMCP_Tools_Themer_CPT::TYPES as $t ) {
 			printf( '<option value="%1$s" %2$s>%3$s</option>', esc_attr( $t ), selected( $type, $t, false ), esc_html( $type_labels[ $t ] ?? ucfirst( $t ) ) );
 		}
@@ -222,7 +215,7 @@ JS;
 				$attached,
 				$has_type ? '' : 'display:none;'
 			);
-			printf( '<option value="0">%s</option>', esc_html__( ', None (use builder content) , ', 'emcp-tools' ) );
+			printf( '<option value="0">%s</option>', esc_html__( 'None (use builder content)', 'emcp-tools' ) );
 			if ( $has_type ) {
 				foreach ( self::eligible_templates( $type ) as $tpl ) {
 					printf(
@@ -244,6 +237,39 @@ JS;
 		}
 
 		echo '</div>'; // .emcp-themer-field-row
+
+		// Loop Item preview settings. A part has no conditions; it has a sample
+		// post the editor renders it against. Both panels are always rendered
+		// and themer-conditions.js shows the one that matches the chosen type.
+		$is_part = EMCP_Tools_Themer_CPT::is_part( $type );
+		$pv      = EMCP_Tools_Themer_CPT::loop_preview( (int) $post->ID );
+		printf( '<div id="emcp-themer-loop-preview" class="emcp-themer-loop-preview-panel"%s>', $is_part ? '' : ' style="display:none;"' );
+		echo '<p style="margin:12px 0 4px;"><strong>' . esc_html__( 'Loop Item preview', 'emcp-tools' ) . '</strong><br><span class="description">' . esc_html__( 'A Loop Item renders once per post inside a Loop Grid or Loop Carousel. Choose the sample post the editor previews it with, and the canvas width.', 'emcp-tools' ) . '</span></p>';
+		echo '<div class="emcp-themer-field-row" style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;">';
+		echo '<p style="margin:0;"><label for="emcp-themer-loop-pt">' . esc_html__( 'Preview post type', 'emcp-tools' ) . '</label><br><select id="emcp-themer-loop-pt" name="emcp_themer_loop_preview[post_type]">';
+		foreach ( get_post_types( array( 'public' => true ), 'objects' ) as $pt ) {
+			if ( 'attachment' === $pt->name ) {
+				continue;
+			}
+			printf( '<option value="%1$s" %2$s>%3$s</option>', esc_attr( $pt->name ), selected( $pv['post_type'], $pt->name, false ), esc_html( $pt->label ) );
+		}
+		echo '</select></p>';
+		printf(
+			'<p style="margin:0;"><label for="emcp-themer-loop-pid">%1$s</label><br><input type="number" min="0" class="small-text" id="emcp-themer-loop-pid" name="emcp_themer_loop_preview[post_id]" value="%2$d"> <span class="description">%3$s</span></p>',
+			esc_html__( 'Preview post ID', 'emcp-tools' ),
+			(int) $pv['post_id'],
+			esc_html__( '0 = latest published', 'emcp-tools' )
+		);
+		printf(
+			'<p style="margin:0;"><label for="emcp-themer-loop-width">%1$s</label><br><input type="number" min="%2$d" max="%3$d" step="10" class="small-text" id="emcp-themer-loop-width" name="emcp_themer_loop_preview[width]" value="%4$d"> px</p>',
+			esc_html__( 'Canvas width', 'emcp-tools' ),
+			(int) EMCP_Tools_Themer_CPT::LOOP_PREVIEW_MIN_WIDTH,
+			(int) EMCP_Tools_Themer_CPT::LOOP_PREVIEW_MAX_WIDTH,
+			(int) $pv['width']
+		);
+		echo '</div></div>';
+
+		printf( '<div id="emcp-themer-conditions-wrap"%s>', $is_part ? ' style="display:none;"' : '' );
 
 		// Conflict notice: another template of the same type already targets an
 		// overlapping condition. Only one can render a given slot, so warn the admin.
@@ -287,6 +313,7 @@ JS;
 		if ( ! $this->is_pro() ) {
 			echo '<p class="description emcp-themer-pro-hint">' . esc_html__( 'Free templates support Include rules with broad targeting. Upgrade to EMCP Pro for Exclude rules, per-page / per-category / per-author targeting, priority, and unlimited templates per type.', 'emcp-tools' ) . '</p>';
 		}
+		echo '</div>'; // #emcp-themer-conditions-wrap
 	}
 
 	/**
@@ -314,7 +341,7 @@ JS;
 		}
 
 		// PHP-template attachment (feature-gated; type-enforced server-side).
-		if ( class_exists( 'EMCP_Tools_Themer_PHP' ) && EMCP_Tools_Themer_PHP::enabled() && isset( $_POST['emcp_themer_php_template'] ) ) {
+		if ( class_exists( 'EMCP_Tools_Themer_PHP' ) && EMCP_Tools_Themer_PHP::enabled() && isset( $_POST['emcp_themer_php_template'] ) && EMCP_Tools_Themer_PHP_Store::can_edit() ) {
 			$prev   = (int) get_post_meta( $post_id, '_emcp_themer_php_template', true );
 			$chosen = absint( wp_unslash( $_POST['emcp_themer_php_template'] ) );
 			$ptype  = (string) get_post_meta( $post_id, '_emcp_themer_type', true );
@@ -325,7 +352,20 @@ JS;
 					$chosen = $prev; // keep the previous state on rejection
 				}
 			}
-			self::apply_attachment( $post_id, $chosen, $prev );
+			$applied = self::apply_attachment( $post_id, $chosen, $prev );
+			if ( is_wp_error( $applied ) ) {
+				set_transient( 'emcp_themer_php_notice_' . get_current_user_id(), $applied->get_error_message(), 60 );
+			}
+		}
+
+		$saved_type = (string) get_post_meta( $post_id, '_emcp_themer_type', true );
+		if ( EMCP_Tools_Themer_CPT::is_part( $saved_type ) ) {
+			if ( isset( $_POST['emcp_themer_loop_preview'] ) && is_array( $_POST['emcp_themer_loop_preview'] ) ) {
+				update_post_meta( $post_id, EMCP_Tools_Themer_CPT::META_LOOP_PREVIEW, EMCP_Tools_Themer_CPT::sanitize_loop_preview( wp_unslash( $_POST['emcp_themer_loop_preview'] ) ) ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- sanitized by sanitize_loop_preview().
+			}
+			// A part takes no conditions; stale rules from a former slot type go.
+			delete_post_meta( $post_id, '_emcp_themer_conditions' );
+			return;
 		}
 
 		if ( ! isset( $_POST['emcp_themer_conditions_json'] ) ) {
@@ -485,8 +525,23 @@ JS;
 	 * @param int $themer_id   Themer template id.
 	 * @param int $new_php_id  Newly-attached PHP-template id (0 = detach).
 	 * @param int $prev_php_id Previously-attached PHP-template id (0 = none).
+	 * @return true|WP_Error
 	 */
-	public static function apply_attachment( int $themer_id, int $new_php_id, int $prev_php_id ): void {
+	public static function apply_attachment( int $themer_id, int $new_php_id, int $prev_php_id ) {
+		$post = get_post( $themer_id );
+		if ( ! $post || EMCP_Tools_Themer_CPT::POST_TYPE !== $post->post_type ) {
+			return new WP_Error( 'invalid_themer_template', __( 'The target is not an EMCP Themer template.', 'emcp-tools' ) );
+		}
+		$prev_php_id = (int) get_post_meta( $themer_id, '_emcp_themer_php_template', true );
+		if ( $new_php_id !== $prev_php_id && ! EMCP_Tools_Themer_PHP_Store::can_edit() ) {
+			return new WP_Error( 'cannot_attach_php_template', __( 'You do not have permission to attach PHP templates.', 'emcp-tools' ) );
+		}
+		if ( $new_php_id > 0 ) {
+			$valid = self::validate_attachment( $new_php_id, (string) get_post_meta( $themer_id, '_emcp_themer_type', true ) );
+			if ( is_wp_error( $valid ) ) {
+				return $valid;
+			}
+		}
 		if ( $new_php_id > 0 ) {
 			update_post_meta( $themer_id, '_emcp_themer_php_template', $new_php_id );
 		} else {
@@ -499,5 +554,6 @@ JS;
 		if ( $new_php_id > 0 ) {
 			EMCP_Tools_Themer_PHP_Store::sync_reference( $new_php_id );
 		}
+		return true;
 	}
 }

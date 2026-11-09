@@ -660,6 +660,7 @@ class EMCP_Tools_Media_Library_Abilities {
 						'alt'       => array( 'type' => 'string' ),
 						'width'     => array( 'type' => 'integer' ),
 						'height'    => array( 'type' => 'integer' ),
+						'change_id' => array( 'type' => 'string' ),
 					),
 				),
 				'meta'                => array(
@@ -780,9 +781,12 @@ class EMCP_Tools_Media_Library_Abilities {
 		if ( $skip_webp ) {
 			add_filter( 'emcp_tools_optimize_attachment', '__return_false', 99 );
 		}
-		$attachment_id = media_handle_sideload( $file_array, $post_id, null, $post_data );
-		if ( $skip_webp ) {
-			remove_filter( 'emcp_tools_optimize_attachment', '__return_false', 99 );
+		try {
+			$attachment_id = media_handle_sideload( $file_array, $post_id, null, $post_data );
+		} finally {
+			if ( $skip_webp ) {
+				remove_filter( 'emcp_tools_optimize_attachment', '__return_false', 99 );
+			}
 		}
 
 		if ( is_wp_error( $attachment_id ) ) {
@@ -805,7 +809,18 @@ class EMCP_Tools_Media_Library_Abilities {
 			update_post_meta( (int) $attachment_id, '_wp_attachment_image_alt', sanitize_text_field( (string) $input['alt'] ) );
 		}
 
-		return $this->execute_get_media( array( 'id' => (int) $attachment_id ) );
+		$change_id = '';
+		if ( class_exists( 'EMCP_Tools_Change_Recorder' ) ) {
+			$change_id = EMCP_Tools_Change_Recorder::record_resource_create( (int) $attachment_id, 'media', 'upload-media' );
+			if ( ! EMCP_Tools_Change_Log::$suppress && '' === $change_id ) {
+				return new \WP_Error( 'history_record_failed', __( 'The file was uploaded, but History could not save its creation. Inspect the attachment before retrying.', 'emcp-tools' ), array( 'attachment_id' => (int) $attachment_id ) );
+			}
+		}
+		$result = $this->execute_get_media( array( 'id' => (int) $attachment_id ) );
+		if ( is_array( $result ) ) {
+			$result['change_id'] = $change_id;
+		}
+		return $result;
 	}
 
 	/**

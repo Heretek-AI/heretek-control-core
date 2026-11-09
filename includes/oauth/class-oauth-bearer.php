@@ -25,6 +25,21 @@ if ( ! defined( 'ABSPATH' ) ) {
 class EMCP_Tools_OAuth_Bearer {
 
 	/**
+	 * The EMCP OAuth client id that authenticated this request ('' when none).
+	 *
+	 * @var string
+	 */
+	private static $authenticated_client_id = '';
+
+	/**
+	 * The EMCP OAuth client that authenticated this request, for the request
+	 * context (spec 9.2).
+	 */
+	public static function authenticated_client_id(): string {
+		return self::$authenticated_client_id;
+	}
+
+	/**
 	 * Transport permission callback. Returns bool (fail-closed).
 	 *
 	 * @param WP_REST_Request $request The MCP request.
@@ -42,6 +57,7 @@ class EMCP_Tools_OAuth_Bearer {
 			$row = EMCP_Tools_OAuth_Store::find_token( $token, 'access' );
 			if ( null !== $row && EMCP_Tools_OAuth_Metadata::resource_matches( (string) ( $row['resource'] ?? EMCP_Tools_OAuth_Metadata::resource() ) ) ) {
 				wp_set_current_user( (int) $row['user_id'] );
+				self::$authenticated_client_id = (string) ( $row['client_id'] ?? '' );
 				return true;
 			}
 			return false; // Bearer present but invalid/expired → 401.
@@ -67,11 +83,11 @@ class EMCP_Tools_OAuth_Bearer {
 		if ( is_object( $request ) && method_exists( $request, 'get_header' ) ) {
 			$header = (string) $request->get_header( 'authorization' );
 		}
-		if ( '' === $header && isset( $_SERVER['HTTP_AUTHORIZATION'] ) ) {
-			$header = (string) wp_unslash( $_SERVER['HTTP_AUTHORIZATION'] );
+		if ( '' === $header && isset( $_SERVER['HTTP_AUTHORIZATION'] ) && is_string( $_SERVER['HTTP_AUTHORIZATION'] ) ) {
+			return self::parse_bearer( wp_unslash( $_SERVER['HTTP_AUTHORIZATION'] ) ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Strict credential grammar below rejects malformed bytes without altering credentials.
 		}
-		if ( '' === $header && isset( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ) ) {
-			$header = (string) wp_unslash( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] );
+		if ( '' === $header && isset( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ) && is_string( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ) ) {
+			return self::parse_bearer( wp_unslash( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ) ); // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Strict credential grammar below rejects malformed bytes without altering credentials.
 		}
 		return self::parse_bearer( $header );
 	}
@@ -83,7 +99,7 @@ class EMCP_Tools_OAuth_Bearer {
 	 * @return string Token, or '' if the header is not a Bearer credential.
 	 */
 	public static function parse_bearer( string $header ): string {
-		if ( preg_match( '/^\s*Bearer\s+([A-Za-z0-9\-._~+\/]+=*)\s*$/i', $header, $m ) ) {
+		if ( preg_match( '/\A[ \t]*Bearer[ \t]+([A-Za-z0-9\-._~+\/]+=*)[ \t]*\z/i', $header, $m ) ) {
 			return $m[1];
 		}
 		return '';

@@ -1,6 +1,6 @@
 <?php
 /**
- * Registers all MCP Tools for Elementor abilities with the WordPress Abilities API.
+ * Registers all MCP Tools for WordPress & Page Builders abilities with the WordPress Abilities API.
  *
  * @package EMCP_Tools
  * @since   1.0.0
@@ -106,6 +106,8 @@ class EMCP_Tools_Ability_Registrar {
 			if ( function_exists( 'error_log' ) ) {
 				error_log( 'EMCP Tools: ability registration stopped early: ' . $e->getMessage() );
 			}
+		} finally {
+			EMCP_Tools_Page_Builders::$registering = '';
 		}
 
 		if ( $profile && function_exists( 'error_log' ) ) {
@@ -137,6 +139,7 @@ class EMCP_Tools_Ability_Registrar {
 	 * @return void
 	 */
 	private function register_groups( bool $elementor_active = true ): void {
+		$elementor_active = $elementor_active && EMCP_Tools_Page_Builders::enabled( 'elementor' );
 		// ---- Always-on: pure-WordPress tool groups (no Elementor needed) ----
 
 		// Media Library query ability (list/search the site's own uploads).
@@ -158,6 +161,11 @@ class EMCP_Tools_Ability_Registrar {
 		$content = new EMCP_Tools_Content_Abilities();
 		$content->register();
 		$this->ability_names = array_merge( $this->ability_names, $content->get_ability_names() );
+
+		// Taxonomy term tools (categories, tags, custom taxonomies; WordPress core).
+		$taxonomy = new EMCP_Tools_Taxonomy_Abilities();
+		$taxonomy->register();
+		$this->ability_names = array_merge( $this->ability_names, $taxonomy->get_ability_names() );
 
 		// Redirect Manager abilities (301/302 redirects + broken-link scan; no
 		// Elementor). Gated on the Redirects module (on by default) — abilities
@@ -254,6 +262,51 @@ class EMCP_Tools_Ability_Registrar {
 		$nav_menus->register();
 		$this->ability_names = array_merge( $this->ability_names, $nav_menus->get_ability_names() );
 
+		if ( class_exists( 'EMCP_Tools_Sitekit_Integration' ) && EMCP_Tools_Sitekit_Api::licensed() && EMCP_Tools_Sitekit_Api::active() ) {
+			$sitekit = new EMCP_Tools_Sitekit_Integration(); $sitekit->register();
+			$this->ability_names = array_merge( $this->ability_names, $sitekit->get_ability_names() );
+		}
+		if ( class_exists( 'EMCP_Tools_Ultimate_Member_Integration' ) && EMCP_Tools_Ultimate_Member_Api::licensed() && EMCP_Tools_Ultimate_Member_Api::active() ) {
+			$um = new EMCP_Tools_Ultimate_Member_Integration(); $um->register();
+			$this->ability_names = array_merge( $this->ability_names, $um->get_ability_names() );
+		}
+		if ( class_exists( 'EMCP_Tools_Wordfence_Integration' ) && EMCP_Tools_Wordfence_Api::active() ) {
+			$wordfence = new EMCP_Tools_Wordfence_Integration(); $wordfence->register();
+			$this->ability_names = array_merge( $this->ability_names, $wordfence->get_ability_names() );
+		}
+		if ( class_exists( 'EMCP_Tools_Litespeed_Integration' ) && EMCP_Tools_Litespeed_Api::active() ) {
+			$litespeed = new EMCP_Tools_Litespeed_Integration(); $litespeed->register();
+			$this->ability_names = array_merge( $this->ability_names, $litespeed->get_ability_names() );
+		}
+		if ( class_exists( 'EMCP_Tools_Flamingo_Integration' ) && EMCP_Tools_Flamingo_Api::licensed() && EMCP_Tools_Flamingo_Api::active() ) {
+			$flamingo = new EMCP_Tools_Flamingo_Integration(); $flamingo->register();
+			$this->ability_names = array_merge( $this->ability_names, $flamingo->get_ability_names() );
+		}
+		if ( class_exists( 'EMCP_Tools_Fluentsmtp_Integration' ) && EMCP_Tools_Fluentsmtp_Api::licensed() && EMCP_Tools_Fluentsmtp_Api::active() ) {
+			$fluentsmtp = new EMCP_Tools_Fluentsmtp_Integration(); $fluentsmtp->register();
+			$this->ability_names = array_merge( $this->ability_names, $fluentsmtp->get_ability_names() );
+		}
+		if ( class_exists( 'EMCP_Tools_Wp_Mail_Smtp_Integration' ) && EMCP_Tools_Wp_Mail_Smtp_Api::active() ) {
+			$wpms = new EMCP_Tools_Wp_Mail_Smtp_Integration();
+			$wpms->register();
+			$this->ability_names = array_merge( $this->ability_names, $wpms->get_ability_names() );
+		}
+		if ( class_exists( 'EMCP_Tools_Pods_Integration' ) && EMCP_Tools_Pods_Api::active() ) {
+			$pods = new EMCP_Tools_Pods_Integration();
+			$pods->register();
+			$this->ability_names = array_merge( $this->ability_names, $pods->get_ability_names() );
+		}
+		if ( class_exists( 'EMCP_Tools_Cptui_Integration' ) && EMCP_Tools_Cptui_Api::active() ) {
+			$cptui = new EMCP_Tools_Cptui_Integration();
+			$cptui->register();
+			$this->ability_names = array_merge( $this->ability_names, $cptui->get_ability_names() );
+		}
+		if ( class_exists( 'EMCP_Tools_Redirection_Integration' ) && EMCP_Tools_Redirection_Api::active() ) {
+			$redirection = new EMCP_Tools_Redirection_Integration();
+			$redirection->register();
+			$this->ability_names = array_merge( $this->ability_names, $redirection->get_ability_names() );
+		}
+
 		// ACF abilities — only when Advanced Custom Fields (free or Pro) is active.
 		if ( class_exists( 'EMCP_Tools_ACF_Abilities' ) && EMCP_Tools_ACF_Abilities::acf_active() ) {
 			$acf = new EMCP_Tools_ACF_Abilities();
@@ -266,6 +319,89 @@ class EMCP_Tools_Ability_Registrar {
 			$woo = new EMCP_Tools_Woo_Integration();
 			$woo->register();
 			$this->ability_names = array_merge( $this->ability_names, $woo->get_ability_names() );
+		}
+
+		// FunnelKit Funnel Builder read abilities (Pro) — only when active.
+		if ( class_exists( 'EMCP_Tools_FunnelKit_Integration' ) && EMCP_Tools_FunnelKit_Integration::funnelkit_active() ) {
+			$funnelkit = new EMCP_Tools_FunnelKit_Integration();
+			$funnelkit->register();
+			$this->ability_names = array_merge( $this->ability_names, $funnelkit->get_ability_names() );
+			// funnelkit-write (3.19.0): ships disabled; the Tools grid enables it.
+			if ( class_exists( 'EMCP_Tools_FunnelKit_Write' ) ) {
+				$funnelkit_write = new EMCP_Tools_FunnelKit_Write();
+				$funnelkit_write->register();
+				$this->ability_names = array_merge( $this->ability_names, $funnelkit_write->get_ability_names() );
+			}
+		}
+
+		// FunnelKit Automations read and write abilities (Pro, 3.19.0) — only when Automations is active.
+		if ( class_exists( 'EMCP_Tools_FunnelKit_Automations' ) && EMCP_Tools_FunnelKit_Automations::automations_active() ) {
+			$funnelkit_automations = new EMCP_Tools_FunnelKit_Automations();
+			$funnelkit_automations->register();
+			$this->ability_names = array_merge( $this->ability_names, $funnelkit_automations->get_ability_names() );
+		}
+
+		// Polylang (3.19.0): languages, linked translations and page text, while Polylang is active.
+		if ( class_exists( 'EMCP_Tools_Polylang_Integration' ) && EMCP_Tools_Polylang_Integration::polylang_active() ) {
+			$polylang = new EMCP_Tools_Polylang_Integration();
+			$polylang->register();
+			$this->ability_names = array_merge( $this->ability_names, $polylang->get_ability_names() );
+		}
+
+		// TranslatePress (3.19.0): page and gettext strings and the translation language, while TranslatePress is active.
+		if ( class_exists( 'EMCP_Tools_TranslatePress_Integration' ) && EMCP_Tools_TranslatePress_Integration::translatepress_active() ) {
+			$translatepress = new EMCP_Tools_TranslatePress_Integration();
+			$translatepress->register();
+			$this->ability_names = array_merge( $this->ability_names, $translatepress->get_ability_names() );
+		}
+
+		// TablePress (3.19.0): build, edit, import and place tables, while TablePress is active.
+		if ( class_exists( 'EMCP_Tools_TablePress_Integration' ) && EMCP_Tools_TablePress_Integration::tablepress_active() ) {
+			$tablepress = new EMCP_Tools_TablePress_Integration();
+			$tablepress->register();
+			$this->ability_names = array_merge( $this->ability_names, $tablepress->get_ability_names() );
+		}
+
+		// Tutor LMS (3.19.0): build courses and manage enrolments, while Tutor LMS is active.
+		if ( class_exists( 'EMCP_Tools_Tutor_Integration' ) && EMCP_Tools_Tutor_Integration::tutor_active() ) {
+			$tutor = new EMCP_Tools_Tutor_Integration();
+			$tutor->register();
+			$this->ability_names = array_merge( $this->ability_names, $tutor->get_ability_names() );
+		}
+
+		// LifterLMS (3.19.0): build courses, memberships and enrolments, while LifterLMS is active.
+		if ( class_exists( 'EMCP_Tools_LifterLMS_Integration' ) && EMCP_Tools_LifterLMS_Integration::lifterlms_active() ) {
+			$lifterlms = new EMCP_Tools_LifterLMS_Integration();
+			$lifterlms->register();
+			$this->ability_names = array_merge( $this->ability_names, $lifterlms->get_ability_names() );
+		}
+
+		// The Events Calendar (3.19.0): events, venues, organizers and categories, while TEC is active.
+		if ( class_exists( 'EMCP_Tools_TEC_Integration' ) && EMCP_Tools_TEC_Integration::tec_active() ) {
+			$tec = new EMCP_Tools_TEC_Integration();
+			$tec->register();
+			$this->ability_names = array_merge( $this->ability_names, $tec->get_ability_names() );
+		}
+
+		// Amelia (3.19.0): services, employees, customers, appointments and events, while Amelia is active.
+		if ( class_exists( 'EMCP_Tools_Amelia_Integration' ) && EMCP_Tools_Amelia_Integration::amelia_active() ) {
+			$amelia = new EMCP_Tools_Amelia_Integration();
+			$amelia->register();
+			$this->ability_names = array_merge( $this->ability_names, $amelia->get_ability_names() );
+		}
+
+		// FluentCRM (3.19.0): contacts, tags, lists, fields, notes, campaigns, templates and automations, while FluentCRM is active.
+		if ( class_exists( 'EMCP_Tools_FluentCRM_Integration' ) && EMCP_Tools_FluentCRM_Integration::fluentcrm_active() ) {
+			$fluentcrm = new EMCP_Tools_FluentCRM_Integration();
+			$fluentcrm->register();
+			$this->ability_names = array_merge( $this->ability_names, $fluentcrm->get_ability_names() );
+		}
+
+		// MailPoet (3.19.0): subscribers, lists, tags, custom fields, newsletters, sending and automation status, while MailPoet is active.
+		if ( class_exists( 'EMCP_Tools_MailPoet_Integration' ) && EMCP_Tools_MailPoet_Integration::mailpoet_active() ) {
+			$mailpoet = new EMCP_Tools_MailPoet_Integration();
+			$mailpoet->register();
+			$this->ability_names = array_merge( $this->ability_names, $mailpoet->get_ability_names() );
 		}
 
 		// Meta Box abilities — only when Meta Box (free or extensions) is active.
@@ -324,6 +460,9 @@ class EMCP_Tools_Ability_Registrar {
 		if ( class_exists( 'EMCP_Tools_SlimSEO_Integration' ) ) {
 			$seo_integrations[] = new EMCP_Tools_SlimSEO_Integration();
 		}
+		if ( class_exists( 'EMCP_Tools_Visibility_Integration' ) ) {
+			$seo_integrations[] = new EMCP_Tools_Visibility_Integration();
+		}
 		if ( function_exists( 'emcp_tools_fs' ) && emcp_tools_fs()->can_use_premium_code() ) {
 			foreach ( array(
 				'EMCP_Tools_Yoast_Integration',
@@ -345,46 +484,134 @@ class EMCP_Tools_Ability_Registrar {
 			}
 		}
 
+		if ( EMCP_Tools_Page_Builders::enabled( 'thrive' ) ) {
+			$thrive = new EMCP_Tools_Thrive_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'thrive';
+			try { $thrive->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $thrive->get_ability_names() );
+		}
+		if ( EMCP_Tools_Page_Builders::enabled( 'divi' ) ) {
+			$divi = new EMCP_Tools_Divi_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'divi';
+			try { $divi->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $divi->get_ability_names() );
+		}
+
+		if ( EMCP_Tools_Page_Builders::enabled( 'avada' ) ) {
+			$avada = new EMCP_Tools_Avada_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'avada';
+			try { $avada->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $avada->get_ability_names() );
+		}
+		if ( EMCP_Tools_Page_Builders::enabled( 'flatsome' ) ) {
+			$flatsome = new EMCP_Tools_Flatsome_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'flatsome';
+			try { $flatsome->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $flatsome->get_ability_names() );
+		}
+
+		if ( EMCP_Tools_Page_Builders::enabled( 'beaver' ) ) {
+			$beaver = new EMCP_Tools_Beaver_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'beaver';
+			try { $beaver->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $beaver->get_ability_names() );
+		}
+
+
+		if ( EMCP_Tools_Page_Builders::enabled( 'wpbakery' ) ) {
+			$wpbakery = new EMCP_Tools_WPBakery_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'wpbakery';
+			try { $wpbakery->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $wpbakery->get_ability_names() );
+		}
+
+
+		if ( EMCP_Tools_Page_Builders::enabled( 'kirki' ) ) {
+			$kirki = new EMCP_Tools_Kirki_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'kirki';
+			try { $kirki->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $kirki->get_ability_names() );
+		}
+
+		if ( EMCP_Tools_Page_Builders::enabled( 'oxygen' ) ) {
+			$oxygen = new EMCP_Tools_Oxygen_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'oxygen';
+			try { $oxygen->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $oxygen->get_ability_names() );
+		}
+
+		if ( EMCP_Tools_Page_Builders::enabled( 'breakdance' ) ) {
+			$breakdance = new EMCP_Tools_Breakdance_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'breakdance';
+			try { $breakdance->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $breakdance->get_ability_names() );
+		}
+
+		if ( EMCP_Tools_Page_Builders::enabled( 'bricks' ) ) {
+			$bricks = new EMCP_Tools_Bricks_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'bricks';
+			try { $bricks->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $bricks->get_ability_names() );
+		}
+
+		// Independently enabled Gutenberg extension integrations.
+		foreach ( EMCP_Tools_Page_Builders::block_packs() as $pack_id => $pack ) {
+			if ( EMCP_Tools_Page_Builders::enabled( $pack_id ) ) {
+				$integration = !empty($pack['native_tools']) ? new $pack['class']() : new EMCP_Tools_Block_Pack_Integration( $pack_id );
+				$integration->register();
+				$this->ability_names = array_merge( $this->ability_names, $integration->get_ability_names() );
+			}
+		}
+
 		// Themes-tab integrations — the framework-agnostic active-theme pack always,
 		// per-framework packs only when that framework is the active theme.
 		$theme_integrations = array();
+		if ( class_exists( 'EMCP_Tools_Flatsome_Theme_Integration' ) ) { $theme_integrations[] = new EMCP_Tools_Flatsome_Theme_Integration(); }
 		if ( class_exists( 'EMCP_Tools_Active_Theme_Integration' ) ) {
 			$theme_integrations[] = new EMCP_Tools_Active_Theme_Integration();
 		}
 		if ( class_exists( 'EMCP_Tools_Astra_Integration' ) ) {
 			$theme_integrations[] = new EMCP_Tools_Astra_Integration();
 		}
-		if ( class_exists( 'EMCP_Tools_Spectra_Integration' ) ) {
-			$theme_integrations[] = new EMCP_Tools_Spectra_Integration();
-		}
 		if ( class_exists( 'EMCP_Tools_Kadence_Integration' ) ) {
 			$theme_integrations[] = new EMCP_Tools_Kadence_Integration();
 		}
-		if ( class_exists( 'EMCP_Tools_Kadence_Blocks_Integration' ) ) {
-			$theme_integrations[] = new EMCP_Tools_Kadence_Blocks_Integration();
-		}
-		// GeneratePress + GenerateBlocks (Pro; classes only present when Pro loaded).
+		// GeneratePress theme settings (free since 3.20.0).
 		if ( class_exists( 'EMCP_Tools_GeneratePress_Integration' ) ) {
 			$theme_integrations[] = new EMCP_Tools_GeneratePress_Integration();
-		}
-		if ( class_exists( 'EMCP_Tools_GenerateBlocks_Integration' ) ) {
-			$theme_integrations[] = new EMCP_Tools_GenerateBlocks_Integration();
 		}
 		// BeTheme (Pro): theme options + BeBuilder page content. Registers only
 		// when BeTheme is the active template, so a child theme counts too.
 		if ( class_exists( 'EMCP_Tools_BeTheme_Integration' ) ) {
 			$theme_integrations[] = new EMCP_Tools_BeTheme_Integration();
 		}
-		// Blocksy (Pro): blocks + Companion extensions.
-		if ( class_exists( 'EMCP_Tools_Blocksy_Blocks_Integration' ) ) {
-			$theme_integrations[] = new EMCP_Tools_Blocksy_Blocks_Integration();
+		// Blocksy blocks register independently above; theme and Companion have separate tools.
+		if ( class_exists( 'EMCP_Tools_Blocksy_Theme_Integration' ) ) {
+			$theme_integrations[] = new EMCP_Tools_Blocksy_Theme_Integration();
+		}
+		if ( EMCP_Tools_Page_Builders::enabled( 'visual-composer' ) ) {
+			$visual_composer = new EMCP_Tools_Visual_Composer_Integration();
+			EMCP_Tools_Page_Builders::$registering = 'visual-composer';
+			try { $visual_composer->register(); } finally { EMCP_Tools_Page_Builders::$registering = ''; }
+			$this->ability_names = array_merge( $this->ability_names, $visual_composer->get_ability_names() );
+		}
+		if ( class_exists( 'EMCP_Tools_Blocksy_Content_Integration' ) ) {
+			$theme_integrations[] = new EMCP_Tools_Blocksy_Content_Integration();
 		}
 		if ( class_exists( 'EMCP_Tools_Blocksy_Extensions_Integration' ) ) {
 			$theme_integrations[] = new EMCP_Tools_Blocksy_Extensions_Integration();
 		}
 		foreach ( $theme_integrations as $theme_integration ) {
+			if ( 'betheme' === $theme_integration->id() && ! EMCP_Tools_Page_Builders::enabled( 'bebuilder' ) ) {
+				continue;
+			}
 			if ( $theme_integration->is_available() ) {
-				$theme_integration->register();
+				EMCP_Tools_Page_Builders::$registering = 'betheme' === $theme_integration->id() ? 'bebuilder' : '';
+				try {
+					$theme_integration->register();
+				} finally {
+					EMCP_Tools_Page_Builders::$registering = '';
+				}
 				$this->ability_names = array_merge( $this->ability_names, $theme_integration->get_ability_names() );
 			}
 		}
@@ -399,8 +626,10 @@ class EMCP_Tools_Ability_Registrar {
 			}
 		}
 		foreach ( $addon_packs as $addon_pack ) {
-			if ( $addon_pack->is_available() ) {
+			if ( $elementor_active && $addon_pack->is_available() ) {
+				EMCP_Tools_Page_Builders::$registering = 'elementor';
 				$addon_pack->register();
+				EMCP_Tools_Page_Builders::$registering = '';
 				$this->ability_names = array_merge( $this->ability_names, $addon_pack->get_ability_names() );
 			}
 		}
@@ -409,10 +638,12 @@ class EMCP_Tools_Ability_Registrar {
 		// Both a widget pack AND a data plugin, so unlike the pure packs it keeps
 		// the house read/write dispatcher pair: discovery + templates on read,
 		// templates on write.
-		if ( class_exists( 'EMCP_Tools_UAE_Integration' ) ) {
+		if ( $elementor_active && class_exists( 'EMCP_Tools_UAE_Integration' ) ) {
 			$emcp_uae = new EMCP_Tools_UAE_Integration();
 			if ( $emcp_uae->is_available() ) {
+				EMCP_Tools_Page_Builders::$registering = 'elementor';
 				$emcp_uae->register();
+				EMCP_Tools_Page_Builders::$registering = '';
 				$this->ability_names = array_merge( $this->ability_names, $emcp_uae->get_ability_names() );
 			}
 		}
@@ -441,6 +672,15 @@ class EMCP_Tools_Ability_Registrar {
 		$security = new EMCP_Tools_Security_Abilities();
 		$security->register();
 		$this->ability_names = array_merge( $this->ability_names, $security->get_ability_names() );
+
+		// Access log search (read-only).
+		$access_log = new EMCP_Tools_Access_Log_Abilities();
+		$access_log->register();
+		$this->ability_names = array_merge( $this->ability_names, $access_log->get_ability_names() );
+		// Processes (list read-only; kill disabled-by-default, confirm:true). Linux only.
+		$processes = new EMCP_Tools_Process_Abilities();
+		$processes->register();
+		$this->ability_names = array_merge( $this->ability_names, $processes->get_ability_names() );
 
 		// PHP Snippet abilities (Sandbox) — free, capability-gated, no Elementor.
 		if ( class_exists( 'EMCP_Tools_PHP_Snippet_Abilities' ) ) {
@@ -479,6 +719,7 @@ class EMCP_Tools_Ability_Registrar {
 
 		// ---- Elementor-dependent groups: only when Elementor is active ----
 		if ( $elementor_active ) {
+			EMCP_Tools_Page_Builders::$registering = 'elementor';
 			// P0 query/discovery.
 			$query = new EMCP_Tools_Query_Abilities( $this->data, $this->schema_generator );
 			$query->register();
@@ -590,6 +831,8 @@ class EMCP_Tools_Ability_Registrar {
 			}
 		}
 
+		EMCP_Tools_Page_Builders::$registering = '';
+
 		// Skills read-side (Pro; self-guards on license). Not Elementor-dependent,
 		// so it registers regardless of whether Elementor is active — but gated by
 		// the Agent Skills module so the admin can switch the runtime exposure off.
@@ -622,6 +865,16 @@ class EMCP_Tools_Ability_Registrar {
 			$migrate = new EMCP_Tools_Migrate_Abilities();
 			$migrate->register();
 			$this->ability_names = array_merge( $this->ability_names, $migrate->get_ability_names() );
+		}
+
+		// GSAP Integration (Pro). The module registers local scripts site-wide;
+		// these two dispatchers expose its catalog and settings over MCP.
+		if ( class_exists( 'EMCP_Tools_GSAP_Abilities' )
+			&& class_exists( 'EMCP_Tools_GSAP_Module' )
+			&& EMCP_Tools_GSAP_Module::is_enabled() ) {
+			$gsap = new EMCP_Tools_GSAP_Abilities();
+			$gsap->register();
+			$this->ability_names = array_merge( $this->ability_names, $gsap->get_ability_names() );
 		}
 	}
 

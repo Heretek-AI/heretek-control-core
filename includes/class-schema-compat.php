@@ -42,6 +42,17 @@ class EMCP_Tools_Schema_Compat {
 	 * @return mixed The result of wp_register_ability().
 	 */
 	public static function register_ability( string $name, array $args ) {
+		$builder = class_exists( 'EMCP_Tools_Page_Builders' ) ? EMCP_Tools_Page_Builders::$registering : '';
+		if ( '' !== $builder && isset( $args['execute_callback'] ) && is_callable( $args['execute_callback'] ) ) {
+			$callback = $args['execute_callback'];
+			$args['execute_callback'] = static function ( ...$input ) use ( $builder, $callback ) {
+				if ( ! EMCP_Tools_Page_Builders::enabled( $builder ) ) {
+					return new WP_Error( 'builder_disabled', __( 'This page builder integration is disabled.', 'emcp-tools' ) );
+				}
+				return $callback( ...$input );
+			};
+		}
+		$args   = self::add_open_editor_override( $args );
 		$strict = self::use_strict_schemas();
 
 		if ( isset( $args['input_schema'] ) && is_array( $args['input_schema'] ) ) {
@@ -60,6 +71,46 @@ class EMCP_Tools_Schema_Compat {
 		}
 
 		return wp_register_ability( $name, $args );
+	}
+
+	/**
+	 * Gives an Elementor write tool the `ignore_open_editor` argument (#168).
+	 *
+	 * Applies while the registrar registers the Elementor tools (Page_Builders::$registering
+	 * is 'elementor'), to tools that are
+	 * not read-only and take a `post_id`. A call passing `ignore_open_editor: true`
+	 * runs with EMCP_Tools_Elementor_Editor_Sync's open-editor check switched off.
+	 *
+	 * @since 3.21.0
+	 *
+	 * @param array $args Ability arguments.
+	 * @return array
+	 */
+	private static function add_open_editor_override( array $args ): array {
+		if ( ! class_exists( 'EMCP_Tools_Elementor_Editor_Sync' ) || ! class_exists( 'EMCP_Tools_Page_Builders' ) || 'elementor' !== EMCP_Tools_Page_Builders::$registering ) {
+			return $args;
+		}
+		if ( ! empty( $args['meta']['annotations']['readonly'] ) || ! isset( $args['input_schema']['properties']['post_id'] ) || ! isset( $args['execute_callback'] ) || ! is_callable( $args['execute_callback'] ) ) {
+			return $args;
+		}
+		$arg = EMCP_Tools_Elementor_Editor_Sync::OVERRIDE_ARG;
+		$args['input_schema']['properties'][ $arg ] = array(
+			'type'        => 'boolean',
+			'description' => __( 'Write even though the page looks open in the Elementor editor with unsaved changes. Use only when the user confirms the editor was closed without saving; a later save from an open editor would discard this write.', 'emcp-tools' ),
+		);
+		$callback                 = $args['execute_callback'];
+		$args['execute_callback'] = static function ( ...$call_args ) use ( $callback, $arg ) {
+			$input = ( isset( $call_args[0] ) && is_array( $call_args[0] ) ) ? $call_args[0] : array();
+			if ( empty( $input[ $arg ] ) ) {
+				return $callback( ...$call_args );
+			}
+			return EMCP_Tools_Elementor_Editor_Sync::with_override(
+				static function () use ( $callback, $call_args ) {
+					return $callback( ...$call_args );
+				}
+			);
+		};
+		return $args;
 	}
 
 	/**
@@ -112,8 +163,27 @@ class EMCP_Tools_Schema_Compat {
 					return $veto;
 				}
 			}
-			return self::normalize_result( $callback( ...$call_args ) );
+			++self::$depth;
+			try {
+				return self::normalize_result( $callback( ...$call_args ) );
+			} finally {
+				--self::$depth;
+			}
 		};
+	}
+
+	/** @var int How many EMCP tool callbacks are running (nested calls count). */
+	private static $depth = 0;
+
+	/**
+	 * Whether an EMCP tool callback is running. Kept here, released in a finally, because core's
+	 * WP_Ability::execute() skips wp_after_execute_ability on an error result, a failed output
+	 * check or an exception, so a before/after pair would stay raised in a long-lived process.
+	 *
+	 * @since 3.19.0
+	 */
+	public static function executing(): bool {
+		return self::$depth > 0;
 	}
 
 	/**

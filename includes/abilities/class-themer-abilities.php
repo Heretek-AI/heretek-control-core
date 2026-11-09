@@ -46,11 +46,14 @@ class EMCP_Tools_Themer_Abilities {
 
 	/** @param array|null $input @return bool */
 	public function check_read_permission( $input = null ): bool {
-		return current_user_can( 'edit_posts' );
+		return current_user_can( 'edit_posts' ) && ! EMCP_Tools_Themer_CPT::excluded( get_current_user_id() );
 	}
 
 	/** @param array|null $input @return bool */
 	public function check_write_permission( $input = null ): bool {
+		if ( EMCP_Tools_Themer_CPT::excluded( get_current_user_id() ) ) {
+			return false;
+		}
 		$id = absint( $input['template_id'] ?? 0 );
 		if ( $id ) {
 			return current_user_can( 'edit_post', $id );
@@ -83,14 +86,20 @@ class EMCP_Tools_Themer_Abilities {
 	 */
 	private function summary( int $id ): array {
 		$post = get_post( $id );
-		return array(
+		$type = (string) get_post_meta( $id, '_emcp_themer_type', true );
+		$row  = array(
 			'template_id' => $id,
 			'title'       => $post ? (string) $post->post_title : '',
-			'type'        => (string) get_post_meta( $id, '_emcp_themer_type', true ),
+			'type'        => $type,
+			'is_part'     => EMCP_Tools_Themer_CPT::is_part( $type ),
 			'status'      => $post ? (string) $post->post_status : '',
 			'conditions'  => $this->conditions_of( $id ),
 			'edit_url'    => get_edit_post_link( $id, 'raw' ),
 		);
+		if ( $row['is_part'] ) {
+			$row['preview'] = EMCP_Tools_Themer_CPT::loop_preview( $id );
+		}
+		return $row;
 	}
 
 	/**
@@ -118,7 +127,7 @@ class EMCP_Tools_Themer_Abilities {
 			'emcp-tools/list-theme-templates',
 			array(
 				'label'               => __( 'List Theme Templates', 'emcp-tools' ),
-				'description'         => __( 'Lists EMCP Themer templates (header/footer/single/archive/search/404) with their type + display conditions.', 'emcp-tools' ),
+				'description'         => __( 'Lists EMCP Themer templates (header/footer/single/archive/search/404, plus loop = Loop Item parts) with their type, display conditions and, for Loop Items, preview settings. Filter with type.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_list' ),
 				'permission_callback' => array( $this, 'check_read_permission' ),
@@ -186,14 +195,20 @@ class EMCP_Tools_Themer_Abilities {
 		if ( ! $post || self::POST_TYPE !== $post->post_type ) {
 			return array( 'error' => __( 'Template not found.', 'emcp-tools' ) );
 		}
-		return array(
+		$type = (string) get_post_meta( $id, '_emcp_themer_type', true );
+		$out  = array(
 			'template_id' => $id,
 			'title'       => (string) $post->post_title,
-			'type'        => (string) get_post_meta( $id, '_emcp_themer_type', true ),
+			'type'        => $type,
+			'is_part'     => EMCP_Tools_Themer_CPT::is_part( $type ),
 			'conditions'  => $this->conditions_of( $id ),
 			'builder'     => EMCP_Tools_Themer_Content_Renderer::detect_builder( $id ),
 			'content'     => (string) $post->post_content,
 		);
+		if ( $out['is_part'] ) {
+			$out['preview'] = EMCP_Tools_Themer_CPT::loop_preview( $id );
+		}
+		return $out;
 	}
 
 	// ---- list-condition-targets -------------------------------------------
@@ -240,7 +255,7 @@ class EMCP_Tools_Themer_Abilities {
 			'emcp-tools/create-theme-template',
 			array(
 				'label'               => __( 'Create Theme Template', 'emcp-tools' ),
-				'description'         => __( 'Creates a Themer template of a type (header|footer|single|archive|search|404) with optional initial content + scope. Enforces the free 1-per-type quota. Build its content afterward with the Gutenberg/Elementor tools using the returned template_id.', 'emcp-tools' ),
+				'description'         => __( 'Creates a Themer template of a type (header|footer|single|archive|search|404|loop) with optional initial content + scope. loop creates a Loop Item: a card rendered once per post by the Loop Grid / Loop Carousel widgets and blocks; it takes preview settings instead of conditions. Enforces the free 1-per-type quota. Build its content afterward with the Gutenberg/Elementor tools using the returned template_id.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_create' ),
 				'permission_callback' => array( $this, 'check_write_permission' ),
@@ -251,6 +266,15 @@ class EMCP_Tools_Themer_Abilities {
 						'title'   => array( 'type' => 'string' ),
 						'content' => array( 'type' => 'string', 'description' => __( 'Optional initial content (block or classic markup).', 'emcp-tools' ) ),
 						'scope'   => array( 'type' => 'string', 'description' => __( 'A broad selector key (e.g. entire-site, all-singular, post-type:page).', 'emcp-tools' ) ),
+						'preview' => array(
+							'type'        => 'object',
+							'description' => __( 'Loop Items only: the sample post the editor previews the card with.', 'emcp-tools' ),
+							'properties'  => array(
+								'post_type' => array( 'type' => 'string', 'description' => __( 'Public post type (default post).', 'emcp-tools' ) ),
+								'post_id'   => array( 'type' => 'integer', 'description' => __( 'A specific published post, 0 = latest of the type.', 'emcp-tools' ) ),
+								'width'     => array( 'type' => 'integer', 'description' => __( 'Editor canvas width in px, 200 to 1200 (default 400).', 'emcp-tools' ) ),
+							),
+						),
 					),
 					'required'   => array( 'type' ),
 				),
@@ -266,7 +290,7 @@ class EMCP_Tools_Themer_Abilities {
 			'emcp-tools/update-theme-template',
 			array(
 				'label'               => __( 'Update Theme Template', 'emcp-tools' ),
-				'description'         => __( 'Updates a Themer template\'s title and/or content.', 'emcp-tools' ),
+				'description'         => __( 'Updates a Themer template\'s title and/or content, and for a Loop Item its preview settings.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_update' ),
 				'permission_callback' => array( $this, 'check_write_permission' ),
@@ -276,6 +300,15 @@ class EMCP_Tools_Themer_Abilities {
 						'template_id' => array( 'type' => 'integer' ),
 						'title'       => array( 'type' => 'string' ),
 						'content'     => array( 'type' => 'string' ),
+						'preview'     => array(
+							'type'        => 'object',
+							'description' => __( 'Loop Items only: the sample post the editor previews the card with.', 'emcp-tools' ),
+							'properties'  => array(
+								'post_type' => array( 'type' => 'string', 'description' => __( 'Public post type (default post).', 'emcp-tools' ) ),
+								'post_id'   => array( 'type' => 'integer', 'description' => __( 'A specific published post, 0 = latest of the type.', 'emcp-tools' ) ),
+								'width'     => array( 'type' => 'integer', 'description' => __( 'Editor canvas width in px, 200 to 1200 (default 400).', 'emcp-tools' ) ),
+							),
+						),
 					),
 					'required'   => array( 'template_id' ),
 				),
@@ -394,6 +427,21 @@ class EMCP_Tools_Themer_Abilities {
 		$post_id = (int) $post_id;
 		update_post_meta( $post_id, '_emcp_themer_type', $type );
 
+		$result = array(
+			'template_id' => $post_id,
+			'type'        => $type,
+			'is_part'     => EMCP_Tools_Themer_CPT::is_part( $type ),
+			'edit_url'    => get_edit_post_link( $post_id, 'raw' ),
+		);
+
+		// A part takes preview settings, never conditions.
+		if ( EMCP_Tools_Themer_CPT::is_part( $type ) ) {
+			$preview = EMCP_Tools_Themer_CPT::sanitize_loop_preview( is_array( $input['preview'] ?? null ) ? $input['preview'] : array() );
+			update_post_meta( $post_id, EMCP_Tools_Themer_CPT::META_LOOP_PREVIEW, $preview );
+			$result['preview'] = $preview;
+			return $result;
+		}
+
 		// Seed a broad scope for header/footer/single/archive; search/404 need no rule.
 		$scope = isset( $input['scope'] ) ? (string) $input['scope'] : '';
 		if ( '' === $scope && in_array( $type, array( 'header', 'footer' ), true ) ) {
@@ -414,7 +462,7 @@ class EMCP_Tools_Themer_Abilities {
 		update_post_meta( $post_id, '_emcp_themer_conditions', $conditions );
 		EMCP_Tools_Themer_Index::rebuild();
 
-		return array( 'template_id' => $post_id, 'type' => $type, 'edit_url' => get_edit_post_link( $post_id, 'raw' ) );
+		return $result;
 	}
 
 	/**
@@ -453,6 +501,10 @@ class EMCP_Tools_Themer_Abilities {
 		if ( isset( $input['content'] ) ) {
 			$data['post_content'] = wp_slash( (string) $input['content'] );
 		}
+		if ( isset( $input['preview'] ) && is_array( $input['preview'] ) && EMCP_Tools_Themer_CPT::is_part( EMCP_Tools_Themer_CPT::template_type( $id ) ) ) {
+			$current = EMCP_Tools_Themer_CPT::loop_preview( $id );
+			update_post_meta( $id, EMCP_Tools_Themer_CPT::META_LOOP_PREVIEW, EMCP_Tools_Themer_CPT::sanitize_loop_preview( array_merge( $current, $input['preview'] ) ) );
+		}
 		wp_update_post( $data, true );
 		return array( 'success' => true, 'template_id' => $id );
 	}
@@ -465,6 +517,12 @@ class EMCP_Tools_Themer_Abilities {
 		$post = $id ? get_post( $id ) : null;
 		if ( ! $post || self::POST_TYPE !== $post->post_type ) {
 			return array( 'error' => __( 'Template not found.', 'emcp-tools' ) );
+		}
+		if ( EMCP_Tools_Themer_CPT::is_part( EMCP_Tools_Themer_CPT::template_type( $id ) ) ) {
+			return array(
+				'error' => __( 'A Loop Item takes no display conditions: it renders wherever a Loop Grid or Loop Carousel uses it. Set its preview with update-theme-template instead.', 'emcp-tools' ),
+				'code'  => 'loop_takes_no_conditions',
+			);
 		}
 		$include = isset( $input['include'] ) && is_array( $input['include'] ) ? $input['include'] : array();
 		$exclude = isset( $input['exclude'] ) && is_array( $input['exclude'] ) ? $input['exclude'] : array();

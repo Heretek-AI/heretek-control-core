@@ -55,15 +55,6 @@ class EMCP_Tools_Plugin {
 	 */
 	private $registrar;
 
-	/** @var float|null MCP request start time (for the request log). */
-	private $mcp_req_start = null;
-
-	/** @var string MCP request tool name (for the request log). */
-	private $mcp_req_tool = '';
-
-	/** @var string MCP request id header (for the request log). */
-	private $mcp_req_id = '';
-
 	/**
 	 * The admin settings page handler.
 	 *
@@ -124,11 +115,8 @@ class EMCP_Tools_Plugin {
 		add_action( 'wp_abilities_api_categories_init', array( $this, 'register_category' ) );
 		add_action( 'wp_abilities_api_init', array( $this, 'register_abilities' ) );
 
-		// The Abilities API is lazy-loaded: wp_abilities_api_init fires on the first
-		// abilities-API call (wp_get_ability()/wp_has_ability()). The default MCP
-		// server's tool registration triggers this during mcp_adapter_init at
-		// priority 10. We hook at priority 20 so the Abilities API is initialized
-		// and our abilities are registered by then.
+		// Register after the adapter's default server, when present. Our callback
+		// also initializes the lazy Abilities API when that server is disabled.
 		add_action( 'mcp_adapter_init', array( $this, 'register_mcp_server' ), 20 );
 
 		// Apply the disabled-tools option from the admin settings page on every
@@ -141,57 +129,18 @@ class EMCP_Tools_Plugin {
 		// home host (connector left pointed at an old/temporary domain).
 		require_once EMCP_TOOLS_DIR . 'includes/class-mcp-host-guard.php';
 		add_filter( 'rest_pre_dispatch', array( 'EMCP_Tools_MCP_Host_Guard', 'guard' ), 5, 3 );
+		// Adapter 0.7 requires MCP-Protocol-Version after initialize; fill it from
+		// the negotiated session for clients that omit it (the Cloud Gateway did).
+		require_once EMCP_TOOLS_DIR . 'includes/class-mcp-protocol-header.php';
+		add_filter( 'rest_pre_dispatch', array( 'EMCP_Tools_MCP_Protocol_Header', 'fill' ), 4, 3 );
 		// Never cache/buffer MCP responses (LiteSpeed/QUIC drop-suspect, Issue 1).
 		add_filter( 'rest_pre_serve_request', array( 'EMCP_Tools_MCP_Host_Guard', 'no_store_headers' ), 10, 4 );
 
-		// Record every MCP request (tool, status, duration) for the MCP Log tab.
-		require_once EMCP_TOOLS_DIR . 'includes/class-mcp-request-log.php';
-		add_filter( 'rest_pre_dispatch', array( $this, 'mcp_log_pre_dispatch' ), 6, 3 );
-		add_filter( 'rest_post_dispatch', array( $this, 'mcp_log_post_dispatch' ), 10, 3 );
-	}
-
-	/**
-	 * Capture the start of an MCP request (timer + tool name + request id).
-	 *
-	 * @param mixed $result  Pass-through.
-	 * @param mixed $server  REST server (unused).
-	 * @param mixed $request WP_REST_Request.
-	 * @return mixed Unmodified $result.
-	 */
-	public function mcp_log_pre_dispatch( $result, $server, $request ) {
-		if ( is_object( $request ) && method_exists( $request, 'get_route' ) && 0 === strpos( (string) $request->get_route(), '/mcp/emcp-tools-server' ) ) {
-			$this->mcp_req_start = microtime( true );
-			$body                = json_decode( (string) $request->get_body(), true );
-			$this->mcp_req_tool  = is_array( $body ) ? (string) ( $body['params']['name'] ?? ( $body['method'] ?? '' ) ) : '';
-			$this->mcp_req_id    = (string) ( $request->get_header( 'x-request-id' ) ? $request->get_header( 'x-request-id' ) : '' );
-		}
-		return $result;
-	}
-
-	/**
-	 * Record the result of an MCP request.
-	 *
-	 * @param mixed $response REST response / WP_Error.
-	 * @param mixed $server   REST server (unused).
-	 * @param mixed $request  WP_REST_Request.
-	 * @return mixed Unmodified $response.
-	 */
-	public function mcp_log_post_dispatch( $response, $server, $request ) {
-		if ( is_object( $request ) && method_exists( $request, 'get_route' ) && 0 === strpos( (string) $request->get_route(), '/mcp/emcp-tools-server' ) && null !== $this->mcp_req_start ) {
-			$status = is_wp_error( $response ) ? 'error' : ( is_object( $response ) && method_exists( $response, 'get_status' ) ? (string) $response->get_status() : 'ok' );
-			$error  = is_wp_error( $response ) ? $response->get_error_message() : '';
-			EMCP_Tools_MCP_Request_Log::record(
-				array(
-					'tool'   => $this->mcp_req_tool,
-					'status' => $status,
-					'ms'     => (int) round( ( microtime( true ) - $this->mcp_req_start ) * 1000 ),
-					'req_id' => $this->mcp_req_id,
-					'error'  => $error,
-				)
-			);
-			$this->mcp_req_start = null;
-		}
-		return $response;
+		// MCP log: routed requests are recorded by the adapter observability
+		// handler (create_server below); this REST fallback records the HTTP
+		// requests the router never sees (spec 9.2).
+		add_filter( 'rest_pre_dispatch', array( 'EMCP_Tools_MCP_Log_Recorder', 'pre_dispatch' ), 6, 3 );
+		add_filter( 'rest_post_dispatch', array( 'EMCP_Tools_MCP_Log_Recorder', 'post_dispatch' ), 10, 3 );
 	}
 
 	/**
@@ -295,14 +244,16 @@ class EMCP_Tools_Plugin {
 	 * @return string[]
 	 */
 	public function get_active_ability_names(): array {
-		if ( empty( $this->ability_names ) && function_exists( 'wp_has_ability' ) ) {
-			// Trigger the lazy Abilities API init (fires wp_abilities_api_init →
-			// register_abilities()). Use wp_has_ability() rather than wp_get_ability():
-			// both run the same init, but wp_get_ability() routes through
-			// WP_Abilities_Registry::get_registered(), which raises a "Ability not
-			// found" _doing_it_wrong() whenever the probed name is conditionally
-			// absent — e.g. Elementor-gated list-pages on a non-Elementor site.
-			wp_has_ability( 'emcp-tools/list-pages' );
+		if ( empty( $this->ability_names ) ) {
+			// Any registry lookup triggers wp_abilities_api_init → register_abilities().
+			// wp_has_ability() is a silent check: list-pages is Elementor-only, and
+			// wp_get_ability() raises a "not found" notice without Elementor.
+			if ( function_exists( 'wp_has_ability' ) ) {
+				wp_has_ability( 'emcp-tools/list-pages' );
+			} elseif ( function_exists( 'wp_get_ability' ) ) {
+				wp_get_ability( 'emcp-tools/list-pages' );
+			}
+		}
 		}
 		return is_array( $this->ability_names ) ? $this->ability_names : array();
 	}
@@ -324,7 +275,10 @@ class EMCP_Tools_Plugin {
 			return;
 		}
 
-		if ( empty( $this->ability_names ) ) {
+		// The default adapter server is optional (Elementor 4.3.3 disables it
+		// while its own MCP is off). Initialize our abilities independently so
+		// the endpoint does not silently disappear on a fresh REST request.
+		if ( empty( $this->get_active_ability_names() ) ) {
 			return;
 		}
 
@@ -351,11 +305,11 @@ class EMCP_Tools_Plugin {
 			'mcp',                                                    // route_namespace
 			'emcp-tools-server',                                   // route
 			__( 'Heretek Control Core Server', 'emcp-tools' ),            // server_name
-			EMCP_Tools_Site_Context::compose_instructions( EMCP_Tools_Site_Context::default_base() . "\n\n" . EMCP_Tools_Site_Context::environment_summary() ), // description (base + env + site context)
+			EMCP_Tools_Site_Context::server_instructions(),         // description (base + env + profile + site context)
 			'v' . EMCP_TOOLS_VERSION,                              // version
 			array( \WP\MCP\Transport\HttpTransport::class ),          // transports
 			null,                                                     // error_handler (use default)
-			null,                                                     // observability_handler
+			EMCP_Tools_MCP_Log_Recorder::observability_class(),       // observability_handler (null: REST fallback logs)
 			$tools,                                                   // tools
 			array(),                                                  // resources
 			array(),                                                  // prompts

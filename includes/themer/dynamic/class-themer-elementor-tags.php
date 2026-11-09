@@ -64,6 +64,97 @@ class EMCP_Tools_Themer_Elementor_Tags {
 	}
 
 	/**
+	 * Whether a value type is served by an Elementor data tag.
+	 *
+	 * Image and URL sources fill controls that read a VALUE (the media control's
+	 * `{id, url}`, the URL control's `url` property), so they must be data
+	 * tags. Text and date stay render tags.
+	 *
+	 * @since 3.18.0
+	 * @param string $type Value type.
+	 * @return bool
+	 */
+	public static function is_data_type( string $type ): bool {
+		return in_array( $type, array( 'image', 'url' ), true );
+	}
+
+	/**
+	 * The value an Elementor data tag hands its control, for a source key.
+	 *
+	 * Image: `array( 'id' => attachment id or '', 'url' => url )`, the shape
+	 * Elementor's media control and its CSS generator read. An avatar has no
+	 * attachment, so its id is '', as in Elementor Pro's own tag.
+	 * URL: the raw URL string (Elementor escapes it where it prints it).
+	 * Any other type: ''.
+	 *
+	 * Pure over EMCP_Tools_Themer_Dynamic::value(), so it is unit-testable
+	 * without Elementor loaded.
+	 *
+	 * @since 3.18.0
+	 * @param string $key  Source key.
+	 * @param array  $args Source args (the tag's settings).
+	 * @return array|string
+	 */
+	public static function data_value( string $key, array $args = array() ) {
+		$v = EMCP_Tools_Themer_Dynamic::value( $key, $args );
+
+		if ( 'image' === $v['type'] ) {
+			$img = is_array( $v['value'] ) ? $v['value'] : array();
+			$id  = isset( $img['id'] ) ? (int) $img['id'] : 0;
+			return array(
+				'id'  => $id > 0 ? $id : '',
+				'url' => isset( $img['url'] ) && is_string( $img['url'] ) ? $img['url'] : '',
+			);
+		}
+		if ( 'url' === $v['type'] ) {
+			return is_string( $v['value'] ) ? esc_url_raw( $v['value'] ) : '';
+		}
+		return '';
+	}
+
+	/**
+	 * Substitute a data tag's Fallback setting when its value is empty.
+	 *
+	 * The fallback arrives as whatever was saved: a MEDIA value `{id, url}` or
+	 * URL value `{url, ...}` from the current controls, or a plain string from
+	 * the text Fallback the former render tags offered. All three work.
+	 *
+	 * @since 3.18.0
+	 * @param array|string $value    What data_value() returned.
+	 * @param mixed        $fallback The saved fallback.
+	 * @param string       $type     Source value type (image|url).
+	 * @return array|string
+	 */
+	public static function apply_data_fallback( $value, $fallback, string $type ) {
+		$fb_url = '';
+		$fb_id  = 0;
+		if ( is_array( $fallback ) ) {
+			$fb_url = isset( $fallback['url'] ) && is_string( $fallback['url'] ) ? trim( $fallback['url'] ) : '';
+			$fb_id  = isset( $fallback['id'] ) ? (int) $fallback['id'] : 0;
+		} elseif ( is_string( $fallback ) ) {
+			$fb_url = trim( $fallback );
+		}
+
+		if ( 'image' === $type ) {
+			$empty = ! is_array( $value ) || '' === (string) ( $value['url'] ?? '' );
+			if ( ! $empty || '' === $fb_url ) {
+				return $value;
+			}
+			return array(
+				'id'  => $fb_id > 0 ? $fb_id : '',
+				'url' => esc_url_raw( $fb_url ),
+			);
+		}
+		if ( 'url' === $type ) {
+			if ( ( is_string( $value ) && '' !== $value ) || '' === $fb_url ) {
+				return $value;
+			}
+			return esc_url_raw( $fb_url );
+		}
+		return $value;
+	}
+
+	/**
 	 * Source keys that become tags.
 	 *
 	 * @return string[]

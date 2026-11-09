@@ -13,6 +13,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+// Every save below consults the editor sync bridge; load it with the data layer.
+require_once __DIR__ . '/class-elementor-editor-sync.php';
+
 /**
  * Data access layer wrapping Elementor's internal APIs.
  *
@@ -274,6 +277,30 @@ class EMCP_Tools_Data {
 	}
 
 	/**
+	 * Flatten an element tree to its ids, depth first.
+	 *
+	 * @since 3.17.1
+	 *
+	 * @param array $elements Element tree.
+	 * @return string[]
+	 */
+	public static function collect_element_ids( array $elements ): array {
+		$ids = array();
+		foreach ( $elements as $element ) {
+			if ( ! is_array( $element ) ) {
+				continue;
+			}
+			if ( isset( $element['id'] ) && is_scalar( $element['id'] ) ) {
+				$ids[] = (string) $element['id'];
+			}
+			if ( ! empty( $element['elements'] ) && is_array( $element['elements'] ) ) {
+				$ids = array_merge( $ids, self::collect_element_ids( $element['elements'] ) );
+			}
+		}
+		return $ids;
+	}
+
+	/**
 	 * Saves page data using Elementor's native save mechanism.
 	 *
 	 * Tries document save() first (triggers CSS regeneration). If that fails
@@ -293,6 +320,13 @@ class EMCP_Tools_Data {
 			return $document;
 		}
 
+		// Another user's unsaved editor session would overwrite this write on
+		// its next save (Elementor 4.3+ guard, same rule as its own MCP tools).
+		$emcp_guard = EMCP_Tools_Elementor_Editor_Sync::guard( $post_id );
+		if ( $emcp_guard ) {
+			return $emcp_guard;
+		}
+
 		// v4 atomic: Elementor validates the WHOLE element tree on save, so one
 		// widget holding raw (unwrapped) prop values blocks every save of the
 		// page, including the edit meant to repair it. Coercing only the element
@@ -301,6 +335,10 @@ class EMCP_Tools_Data {
 		// Sweep the tree on the way out instead. This only ever turns invalid
 		// values into valid ones, so it is a no-op for healthy pages.
 		$data = EMCP_Tools_Atomic_Props::coerce_tree( $data );
+
+		// Classic dimension sides (margin/padding/gap/border) must be strings or
+		// the editor's Layout panel shows 0 for a value that renders fine (#146).
+		$data = EMCP_Tools_Element_Factory::normalize_dimension_tree( $data );
 
 		// Capture the prior Elementor data so the change ledger can offer a rollback.
 		$emcp_before_raw = get_post_meta( $post_id, '_elementor_data', true );
@@ -367,6 +405,16 @@ class EMCP_Tools_Data {
 				? json_decode( $persisted_raw, true )
 				: null;
 			if ( empty( $persisted ) || ! is_array( $persisted ) ) {
+				$needs_fallback = true;
+			} elseif ( array_diff( self::collect_element_ids( $data ), self::collect_element_ids( $persisted ) ) ) {
+				// PARTIAL drop (#143): Document::save() rebuilds the tree through
+				// create_element_instance(), which returns null for a widget type
+				// not registered in this context (FunnelKit / CartFlows checkout
+				// widgets register conditionally, so they are absent under CLI and
+				// REST) and get_elements_raw_data() silently skips it. The native
+				// save then reports success with the widget gone. Any element we
+				// sent that did not land forces the direct write, which keeps every
+				// element byte for byte.
 				$needs_fallback = true;
 			}
 		}
@@ -436,6 +484,9 @@ class EMCP_Tools_Data {
 			}
 		}
 
+		// After the save: Elementor clears the marker on after_save.
+		EMCP_Tools_Elementor_Editor_Sync::mark_changed( $post_id );
+
 		return true;
 	}
 
@@ -458,22 +509,64 @@ class EMCP_Tools_Data {
 			return $document;
 		}
 
-		$result = $document->save( array( 'settings' => $settings ) );
+		$emcp_guard = EMCP_Tools_Elementor_Editor_Sync::guard( $post_id );
+		if ( $emcp_guard ) {
+			return $emcp_guard;
+		}
+
+		$before = get_post_meta( $post_id, '_elementor_page_settings', false );
+
+		// Elementor's page-settings manager writes `_elementor_page_settings`
+		// as a FULL REPLACE, so a one-key patch on the active kit wiped every
+		// custom color, typography preset and site-identity value it held (#145).
+		// This tool is documented as a partial update like update-element, so
+		// merge the patch into what is stored before handing it to Elementor.
+		$existing = get_post_meta( $post_id, '_elementor_page_settings', true );
+		if ( ! is_array( $existing ) ) {
+			$existing = array();
+		}
+		$merged = array_merge( $existing, $settings );
+
+		$result = $document->save( array( 'settings' => $merged ) );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
 
 		if ( ! $result ) {
-			// Fallback: merge settings into existing page settings meta.
-			$existing = get_post_meta( $post_id, '_elementor_page_settings', true );
-			if ( ! is_array( $existing ) ) {
-				$existing = array();
-			}
-
-			$merged = array_merge( $existing, $settings );
-			update_post_meta( $post_id, '_elementor_page_settings', $merged );
+			// Fallback: direct meta write for non-browser contexts (CLI, REST proxy).
+			update_post_meta( $post_id, '_elementor_page_settings', wp_slash( $merged ) );
 
 			// Invalidate CSS cache.
 			delete_post_meta( $post_id, '_elementor_css' );
 		}
 
+		$after = get_post_meta( $post_id, '_elementor_page_settings', false );
+		if ( ! $result && ( empty( $after ) || $merged !== $after[0] ) ) {
+			return new \WP_Error( 'save_failed', __( 'Could not persist the page settings.', 'emcp-tools' ) );
+		}
+		// Custom CSS is stored verbatim in this meta. Other native settings can
+		// map to post fields or be normalized by Elementor; do not reject those
+		// merely because their input representation is absent from this meta.
+		if ( $result && $before === $after && array_key_exists( 'custom_css', $settings ) ) {
+			$stored = isset( $after[0] ) && is_array( $after[0] ) ? $after[0] : array();
+			if ( ! array_key_exists( 'custom_css', $stored ) || $stored['custom_css'] !== $settings['custom_css'] ) {
+				return new \WP_Error( 'save_failed', __( 'Elementor did not persist the requested custom CSS.', 'emcp-tools' ) );
+			}
+		}
+		if ( $before !== $after && class_exists( 'EMCP_Tools_Change_Recorder' ) ) {
+			$history_id = EMCP_Tools_Change_Recorder::record_post_fields(
+				$post_id,
+				array( 'meta_rows' => array( '_elementor_page_settings' => $before ) ),
+				sprintf( 'Updated Elementor page settings #%d', $post_id ),
+				'Elementor page #' . $post_id,
+				'elementor',
+				'page-settings'
+			);
+			if ( '' === $history_id && ! EMCP_Tools_Change_Log::$suppress ) {
+				return new \WP_Error( 'history_record_failed', __( 'The page settings were saved, but their History entry could not be persisted.', 'emcp-tools' ) );
+			}
+		}
+		EMCP_Tools_Elementor_Editor_Sync::mark_changed( $post_id );
 		return true;
 	}
 
@@ -614,24 +707,41 @@ class EMCP_Tools_Data {
 		return $count;
 	}
 
-	/**
-	 * Updates settings for a specific element in the tree.
-	 *
-	 * Modifies `$data` by reference. Returns true if element was found
-	 * and updated, false if the element ID was not found.
-	 *
-	 * @since 1.0.0
-	 *
-	 * @param array  $data       The element tree (passed by reference).
-	 * @param string $element_id The element ID to update.
-	 * @param array  $settings   The settings to merge.
-	 * @return bool True if updated, false if not found.
-	 */
+	/** Determine which native serialization contract an element uses. */
+	public static function is_atomic_element( array $element ): bool {
+		$type = (string) ( $element['elType'] ?? '' );
+		$widget = (string) ( $element['widgetType'] ?? '' );
+		if ( in_array( $type, array( 'e-flexbox', 'e-div-block' ), true ) || in_array( $widget, array( 'e-flexbox', 'e-div-block' ), true ) ) {
+			return true;
+		}
+		if ( 'widget' === $type && EMCP_Tools_Atomic_Widget_Map::is_atomic( $widget ) ) {
+			return true;
+		}
+		if ( ! class_exists( '\Elementor\Plugin' ) ) {
+			return false;
+		}
+		$manager = 'widget' === $type ? ( \Elementor\Plugin::$instance->widgets_manager ?? null ) : ( \Elementor\Plugin::$instance->elements_manager ?? null );
+		$method = 'widget' === $type ? 'get_widget_types' : 'get_element_types';
+		$registered = $manager && method_exists( $manager, $method ) ? $manager->$method( 'widget' === $type ? $widget : $type ) : null;
+		return is_object( $registered ) && method_exists( $registered, 'get_props_schema' );
+	}
+
+	/** Merge settings into an element by ID, modifying the tree by reference. */
 	public function update_element_settings( array &$data, string $element_id, array $settings ): bool {
 		foreach ( $data as &$item ) {
 			if ( isset( $item['id'] ) && $item['id'] === $element_id ) {
 				if ( ! isset( $item['settings'] ) ) {
 					$item['settings'] = array();
+				}
+
+				// Classic Elementor serializes Navigator names as settings._title;
+				// only atomic elements retain editor_settings at the root (#133).
+				if ( ! self::is_atomic_element( $item ) && isset( $settings['editor_settings']['title'] ) ) {
+					$settings['_title'] = $settings['editor_settings']['title'];
+					unset( $settings['editor_settings']['title'] );
+					if ( empty( $settings['editor_settings'] ) ) {
+						unset( $settings['editor_settings'] );
+					}
 				}
 
 				// Sibling-root keys: on v4 atomic elements the local `styles`
@@ -655,7 +765,9 @@ class EMCP_Tools_Data {
 
 					if ( is_array( $incoming ) ) {
 						$existing = isset( $item[ $root_key ] ) && is_array( $item[ $root_key ] ) ? $item[ $root_key ] : array();
-						$item[ $root_key ] = self::deep_merge( $existing, $incoming );
+						$item[ $root_key ] = 'styles' === $root_key
+							? self::merge_styles( $existing, $incoming )
+							: self::deep_merge( $existing, $incoming );
 					} else {
 						$item[ $root_key ] = $incoming;
 					}
@@ -729,6 +841,106 @@ class EMCP_Tools_Data {
 	 * @param array $incoming The value to merge in (wins on conflicts).
 	 * @return array The merged array.
 	 */
+	/**
+	 * Merges a `styles` write into the element's local classes (#169).
+	 *
+	 * Classes merge by id; a class set to null is removed. Within a class, variants
+	 * are matched by breakpoint and state and their props merge per prop: a prop
+	 * sent replaces the stored one, a null prop removes it, props not sent stay.
+	 * A variant whose breakpoint and state are new is appended.
+	 *
+	 * @since 3.21.0
+	 *
+	 * @param array $existing Stored styles map.
+	 * @param array $incoming Styles to write.
+	 * @return array
+	 */
+	private static function merge_styles( array $existing, array $incoming ): array {
+		foreach ( $incoming as $class_id => $def ) {
+			if ( null === $def ) {
+				unset( $existing[ $class_id ] );
+				continue;
+			}
+			if ( ! is_array( $def ) ) {
+				$existing[ $class_id ] = $def;
+				continue;
+			}
+			$current  = isset( $existing[ $class_id ] ) && is_array( $existing[ $class_id ] ) ? $existing[ $class_id ] : array();
+			$variants = $def['variants'] ?? null;
+			unset( $def['variants'] );
+			$current = self::deep_merge( $current, $def );
+			if ( is_array( $variants ) ) {
+				$current['variants'] = self::merge_variants( isset( $current['variants'] ) && is_array( $current['variants'] ) ? $current['variants'] : array(), $variants );
+			}
+			$existing[ $class_id ] = $current;
+		}
+
+		return $existing;
+	}
+
+	/**
+	 * Merges incoming style variants into the stored list.
+	 *
+	 * @since 3.21.0
+	 *
+	 * @param array $existing Stored variants.
+	 * @param array $incoming Variants to write.
+	 * @return array
+	 */
+	private static function merge_variants( array $existing, array $incoming ): array {
+		$existing = array_values( $existing );
+		foreach ( $incoming as $variant ) {
+			if ( ! is_array( $variant ) ) {
+				continue;
+			}
+			$props = isset( $variant['props'] ) && is_array( $variant['props'] ) ? $variant['props'] : array();
+			$match = null;
+			foreach ( $existing as $i => $stored ) {
+				if ( is_array( $stored ) && self::variant_key( $stored ) === self::variant_key( $variant ) ) {
+					$match = $i;
+					break;
+				}
+			}
+			if ( null === $match ) {
+				$variant['props'] = array_filter(
+					$props,
+					static function ( $value ) {
+						return null !== $value;
+					}
+				);
+				$existing[] = $variant;
+				continue;
+			}
+			$stored       = $existing[ $match ];
+			$stored_props = isset( $stored['props'] ) && is_array( $stored['props'] ) ? $stored['props'] : array();
+			foreach ( $props as $name => $value ) {
+				if ( null === $value ) {
+					unset( $stored_props[ $name ] );
+				} else {
+					$stored_props[ $name ] = $value; // A prop's envelope is replaced whole, never mixed.
+				}
+			}
+			unset( $variant['props'], $variant['meta'] );
+			$stored          = array_merge( $stored, $variant );
+			$stored['props'] = $stored_props;
+			$existing[ $match ] = $stored;
+		}
+
+		return $existing;
+	}
+
+	/**
+	 * A variant's identity: its breakpoint and state (null and absent are the same).
+	 *
+	 * @since 3.21.0
+	 *
+	 * @param array $variant Variant.
+	 */
+	private static function variant_key( array $variant ): string {
+		$meta = isset( $variant['meta'] ) && is_array( $variant['meta'] ) ? $variant['meta'] : array();
+		return (string) ( $meta['breakpoint'] ?? 'desktop' ) . '|' . (string) ( $meta['state'] ?? '' );
+	}
+
 	private static function deep_merge( array $existing, array $incoming ): array {
 		foreach ( $incoming as $key => $value ) {
 			if (

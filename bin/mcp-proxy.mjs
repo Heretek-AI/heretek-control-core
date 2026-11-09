@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * MCP Tools for Elementor — stdio-to-HTTP proxy (multi-site capable)
+ * MCP Tools for WordPress & Page Builders — stdio-to-HTTP proxy (multi-site capable)
  *
  * Bridges the MCP stdio transport (Claude Desktop, Claude Code, etc.) to the
  * WordPress MCP Adapter HTTP endpoint. Supports a SITE REGISTRY so one session
@@ -417,7 +417,7 @@ function runProxy() {
     }
   }
 
-  logStderr('MCP Tools for Elementor proxy starting');
+  logStderr('MCP Tools for WordPress & Page Builders proxy starting');
   logStderr(`Sites: ${Object.keys(sites).join(', ')} (active: ${state.active})`);
   if (siteCount > 1) logStderr('Multi-site mode: emcp_list_sites / emcp_use_site available.');
 

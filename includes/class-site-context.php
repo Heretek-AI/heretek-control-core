@@ -134,7 +134,9 @@ class EMCP_Tools_Site_Context {
 		if ( is_string( $stripped ) && $stripped !== $rest ) {
 			return rtrim( $stripped, '/' );
 		}
-		// Plain permalinks: https://host/?rest_route=/ → keep scheme+host(+port+path).
+		// Plain permalinks: https://host/index.php?rest_route=/ → keep scheme+host(+port+path),
+		// dropping the index.php WordPress always inserts before the query on this permalink
+		// structure — it's part of how the REST request is routed, not part of the site's base.
 		$parts = wp_parse_url( $rest );
 		if ( is_array( $parts ) && ! empty( $parts['scheme'] ) && ! empty( $parts['host'] ) ) {
 			$base = $parts['scheme'] . '://' . $parts['host'];
@@ -142,7 +144,9 @@ class EMCP_Tools_Site_Context {
 				$base .= ':' . $parts['port'];
 			}
 			if ( ! empty( $parts['path'] ) ) {
-				$base .= rtrim( (string) $parts['path'], '/' );
+				$path = rtrim( (string) $parts['path'], '/' );
+				$path = preg_replace( '#/index\.php$#', '', $path );
+				$base .= $path;
 			}
 			return rtrim( $base, '/' );
 		}
@@ -202,23 +206,52 @@ class EMCP_Tools_Site_Context {
 	 *
 	 * @return string
 	 */
-	public static function environment_summary(): string {
+	public static function environment_summary( ?array $sections = null ): string {
+		$on    = EMCP_Tools_Context_Sections::enabled( $sections );
 		$wp    = function_exists( 'get_bloginfo' ) ? get_bloginfo( 'version' ) : '';
 		$php   = PHP_VERSION;
 		$lines = array( '## Environment' );
 		$lines[] = sprintf( '- WordPress %s · PHP %s', $wp, $php );
 
-		if ( defined( 'ELEMENTOR_VERSION' ) ) {
-			$atomic  = version_compare( ELEMENTOR_VERSION, '4.0.0', '>=' ) ? ' (atomic elements supported)' : '';
-			$pro     = defined( 'ELEMENTOR_PRO_VERSION' ) ? ' + Pro ' . ELEMENTOR_PRO_VERSION : '';
-			$lines[] = sprintf( '- Elementor %s%s%s', ELEMENTOR_VERSION, $pro, $atomic );
-		} else {
-			$lines[] = '- Elementor: not active (Elementor tools are unavailable; use the WordPress/Gutenberg tools)';
+		if ( $on['builder'] ) {
+			if ( defined( 'ELEMENTOR_VERSION' ) ) {
+				$atomic  = version_compare( ELEMENTOR_VERSION, '4.0.0', '>=' ) ? ' (atomic elements supported)' : '';
+				$pro     = defined( 'ELEMENTOR_PRO_VERSION' ) ? ' + Pro ' . ELEMENTOR_PRO_VERSION : '';
+				$lines[] = sprintf( '- Elementor %s%s%s', ELEMENTOR_VERSION, $pro, $atomic );
+			} else {
+				$lines[] = '- Elementor: not active (Elementor tools are unavailable; use the WordPress/Gutenberg tools)';
+			}
 		}
 
 		$inventory = self::plugin_inventory();
-		if ( '' !== $inventory ) {
+		if ( $on['plugins'] && '' !== $inventory ) {
 			$lines[] = '- Active plugins of note: ' . $inventory;
+		}
+
+		// Sections added in 3.18.0, from a cached summary (EMCP_Tools_Context_Sections::detected()).
+		$new_labels = array(
+			'theme'         => 'Theme',
+			'global_styles' => 'Global styles',
+			'structure'     => 'Site structure',
+			'woocommerce'   => 'WooCommerce',
+		);
+		if ( $on['theme'] || $on['global_styles'] || $on['structure'] || $on['woocommerce'] ) {
+			$detected = EMCP_Tools_Context_Sections::detected();
+			foreach ( $new_labels as $id => $label ) {
+				if ( ! $on[ $id ] || '' === (string) ( $detected[ $id ] ?? '' ) ) {
+					continue;
+				}
+				if ( 'woocommerce' === $id && ! EMCP_Tools_Context_Sections::woocommerce_active() ) {
+					continue;
+				}
+				$lines[] = '- ' . $label . ': ' . $detected[ $id ];
+			}
+		}
+
+		$emcp_official = $on['elementor_mcp_note'] ? self::elementor_mcp_note() : '';
+		if ( '' !== $emcp_official ) {
+			$lines[] = '';
+			$lines[] = $emcp_official;
 		}
 
 		// Read the option directly (not EMCP_Tools_Plugin::is_dispatcher_mode())
@@ -233,7 +266,7 @@ class EMCP_Tools_Site_Context {
 
 		// Discovery-context skills catalog (Pro hooks this to inject a "## Skills"
 		// block; free ships only the empty seam).
-		$emcp_skills = (string) apply_filters( 'emcp_tools_discovery_skills', '' );
+		$emcp_skills = $on['skills'] ? (string) apply_filters( 'emcp_tools_discovery_skills', '' ) : '';
 		if ( '' !== $emcp_skills ) {
 			$lines[] = '';
 			$lines[] = $emcp_skills;
@@ -241,12 +274,91 @@ class EMCP_Tools_Site_Context {
 
 		// Discovery-context project memory (Pro hooks this to inject a
 		// "## Project memory" block of approved guidance; free ships the empty seam).
-		$emcp_memory = (string) apply_filters( 'emcp_tools_discovery_memory', '' );
+		$emcp_memory = $on['memory'] ? (string) apply_filters( 'emcp_tools_discovery_memory', '' ) : '';
 		if ( '' !== $emcp_memory ) {
 			$lines[] = '';
 			$lines[] = $emcp_memory;
 		}
 
+		return implode( "\n", $lines );
+	}
+
+	/**
+	 * The site profile as a "## Site profile" block, '' when nothing is filled.
+	 *
+	 * @param array $profile Sanitised profile.
+	 * @return string
+	 */
+	public static function profile_block( array $profile ): string {
+		$rows  = array(
+			'Business'             => (string) ( $profile['name'] ?? '' ),
+			'Industry'             => (string) ( $profile['industry'] ?? '' ),
+			'What the site is for' => (string) ( $profile['purpose'] ?? '' ),
+			'Brand voice'          => implode( ', ', (array) ( $profile['voice'] ?? array() ) ),
+		);
+		$lines = array();
+		foreach ( $rows as $label => $value ) {
+			if ( '' !== trim( $value ) ) {
+				$lines[] = '- ' . $label . ': ' . str_replace( array( "\r\n", "\n", "\r" ), ' ', trim( $value ) );
+			}
+		}
+		return $lines ? "## Site profile\n" . implode( "\n", $lines ) : '';
+	}
+
+	/**
+	 * Exactly what the MCP server sends as its instructions. The Context
+	 * screen's preview passes an unsaved draft: { profile, sections,
+	 * instructions, enabled }.
+	 *
+	 * @param array|null $draft Draft values that override the stored ones.
+	 * @return string
+	 */
+	public static function server_instructions( ?array $draft = null ): string {
+		$base    = self::default_base() . "\n\n" . self::environment_summary( isset( $draft['sections'] ) ? (array) $draft['sections'] : null );
+		$enabled = isset( $draft['enabled'] ) ? (bool) $draft['enabled'] : self::is_enabled();
+		$context = isset( $draft['instructions'] ) ? (string) $draft['instructions'] : self::get_context();
+		$profile = self::profile_block( EMCP_Tools_Context_Sections::profile( isset( $draft['profile'] ) ? (array) $draft['profile'] : null ) );
+		if ( $enabled && '' !== $profile ) {
+			$base .= "\n\n" . $profile;
+		}
+		return self::compose( $base, $context, $enabled );
+	}
+
+	/**
+	 * Whether Elementor's own MCP server (Elementor 4.3+) is switched on.
+	 *
+	 * @return bool
+	 */
+	public static function elementor_mcp_enabled(): bool {
+		$settings = '\Elementor\MCP\Composer\Admin\McpSettingsController';
+		if ( ! class_exists( $settings ) || ! method_exists( $settings, 'is_enabled' ) ) {
+			return false;
+		}
+		try {
+			return (bool) $settings::is_enabled();
+		} catch ( \Throwable $e ) {
+			return false;
+		}
+	}
+
+	/**
+	 * Tells an agent that may be connected to both servers which one to use.
+	 *
+	 * @return string Empty when Elementor's MCP server is off.
+	 */
+	public static function elementor_mcp_note(): string {
+		if ( ! self::elementor_mcp_enabled() ) {
+			return '';
+		}
+		$lines = array( "## Elementor's own MCP server" );
+		if ( class_exists( 'EMCP_Tools_Page_Builders' ) && EMCP_Tools_Page_Builders::enabled( 'elementor' ) ) {
+			$lines[] = "Elementor's built-in MCP server (`elementor-mcp-server`, tools named `elementor-*`) is also enabled on this site. If you are connected to both, do each step on one server only, never the same step on both:";
+			$lines[] = '- This server: Elementor pages and widgets, global colors, fonts, classes and variables, EMCP Themer templates and loops, WordPress content, media, settings, plugins, users, WooCommerce, other page builders, and History rollback.';
+			$lines[] = "- Elementor's server: only what this server lacks, such as Elementor components, default element styles, interactions and shareable preview links, or when the user asks for it by name.";
+			$lines[] = "Both servers edit the same Elementor data, so re-read the page structure after switching servers.";
+		} else {
+			$lines[] = "Elementor's built-in MCP server (`elementor-mcp-server`) is also enabled, and this server's Elementor tools are off because Elementor is not the page builder selected in EMCP Tools. Edit Elementor pages with Elementor's server; use this server for everything else it offers.";
+		}
 		return implode( "\n", $lines );
 	}
 

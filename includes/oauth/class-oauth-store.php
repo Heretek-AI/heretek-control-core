@@ -189,13 +189,150 @@ class EMCP_Tools_OAuth_Store {
 		global $wpdb;
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT client_id FROM ' . self::clients_table() . ' WHERE client_name = %s AND redirect_uris = %s LIMIT 1',
+				'SELECT client_id FROM %i WHERE client_name = %s AND redirect_uris = %s LIMIT 1', self::clients_table(),
 				mb_substr( $name, 0, 191 ),
 				(string) wp_json_encode( $uris )
 			),
 			ARRAY_A
 		);
 		return $row ? self::get_client( (string) $row['client_id'] ) : null;
+	}
+
+	/** Seconds a fallback lease lives if its process dies without releasing it. */
+	const LOCK_LEASE_TTL = 60;
+
+	/** @var array<string, array{depth:int, mode:string, owner:string}> Locks this process holds. */
+	private static $held = array();
+
+	/** @var EMCP_Tools_Lease|null Lease used where the database has no named locks (tests inject one). */
+	private static $lease = null;
+
+	/**
+	 * Use this lease for the fallback lock; null restores the options-table lease.
+	 *
+	 * @param EMCP_Tools_Lease|null $lease Lease.
+	 */
+	public static function use_lease( ?EMCP_Tools_Lease $lease ): void {
+		self::$lease = $lease;
+		self::$held  = array();
+	}
+
+	/** The registration identity lock name. */
+	private static function registration_lock_key( string $name, array $uris ): string {
+		global $wpdb;
+		$normalized = array_values( array_unique( array_filter( array_map( 'strval', $uris ) ) ) );
+		return 'emcp_oauth_reg_' . md5( $wpdb->prefix . '|' . mb_substr( $name, 0, 191 ) . '|' . wp_json_encode( $normalized ) );
+	}
+
+	/**
+	 * Take a lock, waiting up to $timeout seconds. Re-entrant within this process.
+	 *
+	 * MySQL and MariaDB answer GET_LOCK with 1 (held) or 0 (busy, so the caller
+	 * waits or answers busy). A database without named locks (some managed and
+	 * clustered setups) answers NULL or an error; there the lock is EMCP's lease,
+	 * an atomic options-table row, so OAuth keeps working instead of answering 503.
+	 *
+	 * @param string $key     Lock name.
+	 * @param int    $timeout Seconds to wait.
+	 * @return bool
+	 */
+	private static function lock( string $key, int $timeout ): bool {
+		global $wpdb;
+		if ( isset( self::$held[ $key ] ) ) {
+			++self::$held[ $key ]['depth'];
+			return true;
+		}
+		// A database without named locks answers this with an error: keep it off the page.
+		$quiet  = method_exists( $wpdb, 'suppress_errors' ) ? $wpdb->suppress_errors( true ) : null;
+		$answer = $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $key, max( 0, $timeout ) ) );
+		if ( null !== $quiet ) {
+			$wpdb->suppress_errors( $quiet );
+		}
+		if ( '1' === (string) $answer ) {
+			self::$held[ $key ] = array( 'depth' => 1, 'mode' => 'named', 'owner' => '' );
+			return true;
+		}
+		if ( '0' === (string) $answer ) {
+			return false;
+		}
+		$lease = self::$lease;
+		if ( null === $lease ) {
+			if ( ! class_exists( 'EMCP_Tools_Lease' ) ) {
+				return false;
+			}
+			$lease = new EMCP_Tools_Lease();
+		}
+		$owner    = function_exists( 'wp_generate_uuid4' ) ? wp_generate_uuid4() : bin2hex( random_bytes( 16 ) );
+		$name     = 'oauth_' . md5( $key );
+		$deadline = microtime( true ) + max( 0, $timeout );
+		while ( true ) {
+			if ( $lease->acquire( $name, $owner, self::LOCK_LEASE_TTL ) ) {
+				self::$held[ $key ] = array( 'depth' => 1, 'mode' => 'lease', 'owner' => $owner );
+				return true;
+			}
+			if ( microtime( true ) >= $deadline ) {
+				return false;
+			}
+			usleep( 100000 );
+		}
+	}
+
+	/**
+	 * Release a lock taken with lock(); the outermost release frees it.
+	 *
+	 * @param string $key Lock name.
+	 */
+	private static function unlock( string $key ): void {
+		global $wpdb;
+		if ( ! isset( self::$held[ $key ] ) ) {
+			return;
+		}
+		if ( --self::$held[ $key ]['depth'] > 0 ) {
+			return;
+		}
+		$held = self::$held[ $key ];
+		unset( self::$held[ $key ] );
+		if ( 'named' === $held['mode'] ) {
+			$wpdb->get_var( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $key ) );
+			return;
+		}
+		$lease = self::$lease ?? ( class_exists( 'EMCP_Tools_Lease' ) ? new EMCP_Tools_Lease() : null );
+		if ( $lease ) {
+			$lease->release( 'oauth_' . md5( $key ), $held['owner'] );
+		}
+	}
+
+	/**
+	 * Acquire a lock for a normalized public-client registration identity.
+	 *
+	 * This closes the check-then-insert race in stable client provisioning
+	 * without changing the public DCR table contract.
+	 *
+	 * @param string   $name    Client name.
+	 * @param string[] $uris    Redirect URIs.
+	 * @param int      $timeout Seconds to wait.
+	 * @return bool
+	 */
+	public static function acquire_client_registration_lock( string $name, array $uris, int $timeout = 5 ): bool {
+		global $wpdb;
+		if ( '' === $name || ! is_object( $wpdb ) || ! method_exists( $wpdb, 'get_var' ) || ! method_exists( $wpdb, 'prepare' ) ) {
+			return false;
+		}
+		return self::lock( self::registration_lock_key( $name, $uris ), $timeout );
+	}
+
+	/**
+	 * Release a public-client registration identity lock.
+	 *
+	 * @param string   $name Client name.
+	 * @param string[] $uris Redirect URIs.
+	 */
+	public static function release_client_registration_lock( string $name, array $uris ): void {
+		global $wpdb;
+		if ( '' === $name || ! is_object( $wpdb ) || ! method_exists( $wpdb, 'get_var' ) || ! method_exists( $wpdb, 'prepare' ) ) {
+			return;
+		}
+		self::unlock( self::registration_lock_key( $name, $uris ) );
 	}
 
 	/**
@@ -207,7 +344,7 @@ class EMCP_Tools_OAuth_Store {
 	public static function get_client( string $client_id ): ?array {
 		global $wpdb;
 		$row = $wpdb->get_row(
-			$wpdb->prepare( 'SELECT * FROM ' . self::clients_table() . ' WHERE client_id = %s', $client_id ),
+			$wpdb->prepare( 'SELECT * FROM %i WHERE client_id = %s', self::clients_table(), $client_id ),
 			ARRAY_A
 		);
 		if ( ! $row ) {
@@ -321,7 +458,7 @@ class EMCP_Tools_OAuth_Store {
 		global $wpdb;
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				'SELECT * FROM ' . self::tokens_table() . ' WHERE token_hash = %s AND token_type = %s AND expires_at > %d',
+				'SELECT * FROM %i WHERE token_hash = %s AND token_type = %s AND expires_at > %d', self::tokens_table(),
 				EMCP_Tools_OAuth_Util::hash_token( $token ),
 				$type,
 				time()
@@ -375,7 +512,7 @@ class EMCP_Tools_OAuth_Store {
 		$until = time() + $grace;
 		$wpdb->query(
 			$wpdb->prepare(
-				'UPDATE ' . self::tokens_table() . ' SET expires_at = %d WHERE id = %d AND expires_at > %d',
+				'UPDATE %i SET expires_at = %d WHERE id = %d AND expires_at > %d', self::tokens_table(),
 				$until,
 				$id,
 				$until
@@ -384,14 +521,107 @@ class EMCP_Tools_OAuth_Store {
 	}
 
 	/**
+	 * Move the expiry of a client's live refresh tokens. Tokens at or below
+	 * $floor are skipped: that is where rotate_out_refresh() parks retired ones.
+	 *
+	 * @param string $client_id  Client id.
+	 * @param string $scope      Token scope.
+	 * @param int    $expires_at New expiry.
+	 * @param int    $floor      Only tokens expiring after this move.
+	 * @return bool Whether the update completed.
+	 */
+	public static function extend_refresh_tokens( string $client_id, string $scope, int $expires_at, int $floor ): bool {
+		global $wpdb;
+		$result = $wpdb->query(
+			$wpdb->prepare(
+				'UPDATE %i SET expires_at = %d WHERE client_id = %s AND token_type = %s AND scopes = %s AND expires_at > %d', self::tokens_table(),
+				$expires_at,
+				$client_id,
+				'refresh',
+				$scope,
+				$floor
+			)
+		);
+		return false !== $result;
+	}
+
+	/**
 	 * Revoke every token issued to a client. Returns rows removed.
 	 *
 	 * @param string $client_id Client id.
-	 * @return int
+	 * @return int|false Rows removed, or false on lock/database failure.
 	 */
-	public static function revoke_client( string $client_id ): int {
+	public static function revoke_client( string $client_id ) {
+		if ( '' === $client_id || ! self::acquire_client_token_lock( $client_id ) ) {
+			return false;
+		}
+
+		try {
+			return self::revoke_client_locked( $client_id );
+		} finally {
+			self::release_client_token_lock( $client_id );
+		}
+	}
+
+	/**
+	 * Delete all tokens for a client while its mutation lock is held.
+	 *
+	 * @param string $client_id Client id.
+	 * @return int|false
+	 */
+	public static function revoke_client_locked( string $client_id ) {
 		global $wpdb;
-		return (int) $wpdb->delete( self::tokens_table(), array( 'client_id' => $client_id ), array( '%s' ) );
+		return $wpdb->delete( self::tokens_table(), array( 'client_id' => $client_id ), array( '%s' ) );
+	}
+
+	/**
+	 * Acquire the per-client token mutation lock.
+	 *
+	 * @param string $client_id Client id.
+	 * @param int    $timeout   Seconds to wait.
+	 * @return bool
+	 */
+	public static function acquire_client_token_lock( string $client_id, int $timeout = 5 ): bool {
+		global $wpdb;
+		if ( '' === $client_id || ! is_object( $wpdb ) || ! method_exists( $wpdb, 'get_var' ) || ! method_exists( $wpdb, 'prepare' ) ) {
+			return false;
+		}
+		return self::lock( 'emcp_oauth_' . md5( $wpdb->prefix . '|' . $client_id ), $timeout );
+	}
+
+	/**
+	 * Release the per-client token mutation lock.
+	 *
+	 * @param string $client_id Client id.
+	 */
+	public static function release_client_token_lock( string $client_id ): void {
+		global $wpdb;
+		if ( '' === $client_id || ! is_object( $wpdb ) || ! method_exists( $wpdb, 'get_var' ) || ! method_exists( $wpdb, 'prepare' ) ) {
+			return;
+		}
+		self::unlock( 'emcp_oauth_' . md5( $wpdb->prefix . '|' . $client_id ) );
+	}
+
+	/**
+	 * Revoke every token for a client except one newly-issued refresh token.
+	 *
+	 * @param string $client_id Client id.
+	 * @param int    $keep_id   Token row to preserve.
+	 * @return bool Whether the delete completed.
+	 */
+	public static function revoke_client_tokens_except( string $client_id, int $keep_id ): bool {
+		global $wpdb;
+		if ( '' === $client_id || $keep_id <= 0 ) {
+			return false;
+		}
+		$result = $wpdb->query(
+			$wpdb->prepare(
+				'DELETE FROM %i WHERE client_id = %s AND id <> %d', self::tokens_table(),
+				$client_id,
+				$keep_id
+			)
+		);
+		return false !== $result;
 	}
 
 	/**
@@ -410,12 +640,12 @@ class EMCP_Tools_OAuth_Store {
 				"SELECT c.client_id, c.client_name, c.created_at,
 					COUNT( t.id ) AS active_tokens,
 					MAX( t.user_id ) AS user_id
-				FROM {$clients} c
-				INNER JOIN {$tokens} t
+				FROM %i c
+				INNER JOIN %i t
 					ON t.client_id = c.client_id AND t.expires_at > %d
 				GROUP BY c.client_id, c.client_name, c.created_at
 				ORDER BY c.created_at DESC",
-				time()
+				$clients, $tokens, time()
 			),
 			ARRAY_A
 		);
@@ -468,13 +698,13 @@ class EMCP_Tools_OAuth_Store {
 				"SELECT c.client_id, c.client_name, c.redirect_uris, c.created_at, c.authorized_at,
 					COUNT( t.id ) AS active_tokens,
 					MAX( t.user_id ) AS user_id
-				FROM {$clients} c
-				LEFT JOIN {$tokens} t
+				FROM %i c
+				LEFT JOIN %i t
 					ON t.client_id = c.client_id AND t.expires_at > %d
 				GROUP BY c.client_id, c.client_name, c.redirect_uris, c.created_at, c.authorized_at
 				ORDER BY active_tokens DESC, c.created_at DESC, c.client_id DESC
 				LIMIT %d OFFSET %d",
-				time(),
+				$clients, $tokens, time(),
 				max( 1, $limit ),
 				max( 0, $offset )
 			),
@@ -509,7 +739,7 @@ class EMCP_Tools_OAuth_Store {
 	 */
 	public static function count_clients(): int {
 		global $wpdb;
-		return (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . self::clients_table() );
+		return (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', self::clients_table() ) );
 	}
 
 	/**
@@ -549,11 +779,27 @@ class EMCP_Tools_OAuth_Store {
 	 * @return bool Whether a registration row was removed.
 	 */
 	public static function delete_client( string $client_id ): bool {
-		if ( '' === $client_id ) {
+		if ( '' === $client_id || ! self::acquire_client_token_lock( $client_id ) ) {
 			return false;
 		}
+		try {
+			return self::delete_client_locked( $client_id );
+		} finally {
+			self::release_client_token_lock( $client_id );
+		}
+	}
+
+	/**
+	 * Delete a registration and its tokens while its mutation lock is held.
+	 *
+	 * @param string $client_id Client id.
+	 * @return bool Whether the registration row was removed.
+	 */
+	public static function delete_client_locked( string $client_id ): bool {
 		global $wpdb;
-		self::revoke_client( $client_id );
+		if ( false === self::revoke_client_locked( $client_id ) ) {
+			return false;
+		}
 		return (bool) $wpdb->delete( self::clients_table(), array( 'client_id' => $client_id ), array( '%s' ) );
 	}
 
@@ -569,7 +815,7 @@ class EMCP_Tools_OAuth_Store {
 		$tokens  = self::tokens_table();
 
 		// 1) Expired access/refresh tokens.
-		$wpdb->query( $wpdb->prepare( "DELETE FROM {$tokens} WHERE expires_at < %d", $now ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$wpdb->query( $wpdb->prepare( 'DELETE FROM %i WHERE expires_at < %d', $tokens, $now ) ); // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 
 		// 2) Orphan clients — repeat DCR (or an abandoned registration retry)
 		// leaves token-less rows; drop those older than the grace window.
@@ -586,9 +832,11 @@ class EMCP_Tools_OAuth_Store {
 		// gateway teardown removes it.
 		$wpdb->query(
 			$wpdb->prepare(
-				"DELETE c FROM {$clients} c
-				 LEFT JOIN {$tokens} t ON t.client_id = c.client_id
+				"DELETE c FROM %i c
+				 LEFT JOIN %i t ON t.client_id = c.client_id
 				 WHERE t.id IS NULL AND c.authorized_at = 0 AND c.created_at < %d",
+				$clients,
+				$tokens,
 				$now - self::ORPHAN_CLIENT_GRACE
 			) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		);
@@ -614,11 +862,13 @@ class EMCP_Tools_OAuth_Store {
 		$tokens  = self::tokens_table();
 		$wpdb->query(
 			$wpdb->prepare(
-				"UPDATE {$clients} c
+				"UPDATE %i c
 				 SET c.authorized_at = %d
 				 WHERE c.authorized_at = 0
-				   AND EXISTS ( SELECT 1 FROM {$tokens} t WHERE t.client_id = c.client_id )",
-				time()
+				   AND EXISTS ( SELECT 1 FROM %i t WHERE t.client_id = c.client_id )",
+				$clients,
+				time(),
+				$tokens
 			) // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		);
 	}
@@ -632,7 +882,7 @@ class EMCP_Tools_OAuth_Store {
 		global $wpdb;
 		$wpdb->query(
 			$wpdb->prepare(
-				'UPDATE ' . self::tokens_table() . ' SET resource = %s WHERE resource = %s OR resource IS NULL',
+				'UPDATE %i SET resource = %s WHERE resource = %s OR resource IS NULL', self::tokens_table(),
 				EMCP_Tools_OAuth_Metadata::resource(),
 				''
 			)
@@ -646,7 +896,7 @@ class EMCP_Tools_OAuth_Store {
 		global $wpdb;
 		$wpdb->query(
 			$wpdb->prepare(
-				'UPDATE ' . self::clients_table() . ' SET authorized_at = %d WHERE client_id = %s AND authorized_at = 0',
+				'UPDATE %i SET authorized_at = %d WHERE client_id = %s AND authorized_at = 0', self::clients_table(),
 				time(),
 				$client_id
 			)
@@ -670,5 +920,22 @@ class EMCP_Tools_OAuth_Store {
 		set_transient( self::GC_THROTTLE_OPTION, 1, max( 60, $interval ) );
 		self::gc();
 		return true;
+	}
+
+	/**
+	 * Drops the OAuth tables and clears the version/throttle options. Called
+	 * from the plugin's uninstall handler, registered clients and issued
+	 * tokens are live credentials and must not survive uninstall.
+	 *
+	 * @since 3.19.1
+	 */
+	public static function uninstall_cleanup(): void {
+		global $wpdb;
+		$wpdb->query( 'DROP TABLE IF EXISTS ' . self::clients_table() );
+		$wpdb->query( 'DROP TABLE IF EXISTS ' . self::tokens_table() );
+		delete_option( self::DB_VERSION_OPTION );
+		delete_transient( self::GC_THROTTLE_OPTION );
+		// Lease rows the lock fallback writes on databases without named locks.
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s", $wpdb->esc_like( 'emcp_tools_lease_oauth_' ) . '%' ) );
 	}
 }

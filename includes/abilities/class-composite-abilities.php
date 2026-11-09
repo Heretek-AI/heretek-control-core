@@ -91,10 +91,16 @@ class EMCP_Tools_Composite_Abilities {
 	 *
 	 * @since 1.0.0
 	 *
+	 * @param array|null $input The input data.
 	 * @return bool
 	 */
-	public function check_create_permission(): bool {
-		return current_user_can( 'publish_pages' ) || current_user_can( 'edit_pages' );
+	public function check_create_permission( $input = null ): bool {
+		$post_type = sanitize_key( $input['post_type'] ?? 'page' );
+		$status    = sanitize_key( $input['status'] ?? 'draft' );
+		if ( ! in_array( $post_type, array( 'page', 'post' ), true ) ) {
+			return false;
+		}
+		return true === EMCP_Tools_Post_Authorization::authorize_create( $post_type, $status ?: 'draft' );
 	}
 
 	// -------------------------------------------------------------------------
@@ -204,6 +210,16 @@ class EMCP_Tools_Composite_Abilities {
 		if ( empty( $structure ) || ! is_array( $structure ) ) {
 			return new \WP_Error( 'missing_structure', __( 'The structure parameter is required and must be an array.', 'emcp-tools' ) );
 		}
+		if ( ! in_array( $post_type, array( 'page', 'post' ), true ) ) {
+			return new \WP_Error( 'invalid_post_type', __( 'post_type must be page or post.', 'emcp-tools' ) );
+		}
+		if ( ! in_array( $status, array( 'draft', 'publish' ), true ) ) {
+			return new \WP_Error( 'invalid_status', __( 'status must be draft or publish.', 'emcp-tools' ) );
+		}
+		$authorization = EMCP_Tools_Post_Authorization::authorize_create( $post_type, $status );
+		if ( is_wp_error( $authorization ) ) {
+			return $authorization;
+		}
 
 		// build-page emits legacy `container` elements, which only render when
 		// Elementor's Flexbox Container experiment is active. On installs where it
@@ -222,6 +238,13 @@ class EMCP_Tools_Composite_Abilities {
 		$this->elements_created = 0;
 		$this->warnings         = array();
 		$elements               = $this->build_elements( $structure );
+
+		// Page settings of a new page: partial classic dimensions are left out (#151).
+		if ( ! empty( $page_settings ) && is_array( $page_settings ) ) {
+			$page_guard     = EMCP_Tools_Element_Factory::guard_settings( $page_settings );
+			$page_settings  = $page_guard['settings'];
+			$this->warnings = array_merge( $this->warnings, $page_guard['warnings'] );
+		}
 
 		// Warn on very large pages that may exceed a remote connector's timeout.
 		if ( $this->elements_created > self::SOFT_ELEMENT_LIMIT ) {
@@ -400,7 +423,11 @@ class EMCP_Tools_Composite_Abilities {
 				// Recursively build children with this container's direction.
 				$child_elements = $this->build_elements( $children, true, $direction );
 
-				$container = $this->factory->create_container( $settings, $child_elements );
+				// Partial classic dimensions are left out of a new element (#151).
+				$guard          = EMCP_Tools_Element_Factory::guard_settings( (array) $settings, null, array( 'elType' => 'container' ) );
+				$settings       = $guard['settings'];
+				$container      = $this->factory->create_container( $settings, $child_elements );
+				$this->warnings = array_merge( $this->warnings, $guard['warnings'] );
 
 				if ( $is_inner ) {
 					$container['isInner'] = true;
@@ -419,7 +446,10 @@ class EMCP_Tools_Composite_Abilities {
 					if ( ! $this->widget_type_exists( (string) $widget_type ) ) {
 						$this->warnings[] = sprintf( 'Unknown widget type "%s" — it may render nothing. Check list-widgets for valid types.', (string) $widget_type );
 					}
-					$widget = $this->build_widget( $widget_type, $settings );
+					$guard          = EMCP_Tools_Element_Factory::guard_settings( (array) $settings, null, array( 'elType' => 'widget', 'widgetType' => (string) $widget_type ) );
+					$settings       = $guard['settings'];
+					$widget         = $this->build_widget( $widget_type, $settings );
+					$this->warnings = array_merge( $this->warnings, $guard['warnings'] );
 					$this->elements_created++;
 
 					// Widgets placed directly inside a row container must be

@@ -27,6 +27,13 @@ class EMCP_Tools_Performance_Page_Audit {
 	const RENDER_BLOCK_WARN = 5;
 	const ASSET_SAMPLE_CAP  = 20;
 
+	/** @var EMCP_Tools_Frontend_Page_Fetcher */
+	private $fetcher;
+
+	public function __construct( ?EMCP_Tools_Frontend_Page_Fetcher $fetcher = null ) {
+		$this->fetcher = $fetcher ?: new EMCP_Tools_Frontend_Page_Fetcher();
+	}
+
 	/**
 	 * Perform the loopback fetch and normalize the response.
 	 *
@@ -39,69 +46,21 @@ class EMCP_Tools_Performance_Page_Audit {
 	 * @return array { ok, status_code, response_ms, total_bytes, headers, body, error, host }
 	 */
 	public function fetch( string $url, int $timeout = self::FETCH_TIMEOUT ): array {
-		$origin_host = (string) wp_parse_url( $url, PHP_URL_HOST );
-		$current     = $url;
-		$start       = microtime( true );
-
-		for ( $hop = 0; $hop <= self::MAX_REDIRECTS; $hop++ ) {
-			$res = wp_remote_get(
-				$current,
-				array(
-					'timeout'     => $timeout,
-					'redirection' => 0,
-					'user-agent'  => 'EMCP-Performance-Analyzer/' . ( defined( 'EMCP_TOOLS_VERSION' ) ? EMCP_TOOLS_VERSION : '0' ),
-				)
-			);
-
-			if ( is_wp_error( $res ) ) {
-				$elapsed = (int) round( ( microtime( true ) - $start ) * 1000 );
-				return array(
-					'ok' => false, 'status_code' => 0, 'response_ms' => $elapsed, 'total_bytes' => 0,
-					'headers' => array(), 'body' => '', 'error' => $res->get_error_message(), 'host' => $origin_host,
-				);
-			}
-
-			$status   = (int) wp_remote_retrieve_response_code( $res );
-			$location = (string) wp_remote_retrieve_header( $res, 'location' );
-
-			if ( $status >= 300 && $status < 400 && '' !== $location ) {
-				$next = $this->safe_redirect_target( $location, $current, $origin_host );
-				if ( '' === $next ) {
-					$elapsed = (int) round( ( microtime( true ) - $start ) * 1000 );
-					return array(
-						'ok' => false, 'status_code' => $status, 'response_ms' => $elapsed, 'total_bytes' => 0,
-						'headers' => array(), 'body' => '', 'error' => 'offsite_redirect', 'host' => $origin_host,
-					);
-				}
-				$current = $next;
-				continue;
-			}
-
-			// Terminal response.
-			$elapsed = (int) round( ( microtime( true ) - $start ) * 1000 );
-			$body    = (string) wp_remote_retrieve_body( $res );
-			$bytes   = strlen( $body );
-			$headers = $this->normalize_headers( wp_remote_retrieve_headers( $res ) );
-			if ( strlen( $body ) > self::MAX_HTML_BYTES ) {
-				$body = substr( $body, 0, self::MAX_HTML_BYTES );
-			}
-
-			return array(
-				'ok'          => true,
-				'status_code' => $status,
-				'response_ms' => $elapsed,
-				'total_bytes' => $bytes,
-				'headers'     => $headers,
-				'body'        => $body,
-				'error'       => null,
-				'host'        => $origin_host,
-			);
+		$fetched = $this->fetcher->fetch( $url, $timeout, self::MAX_HTML_BYTES );
+		$error   = (string) ( $fetched['error'] ?? '' );
+		if ( 'off_origin_redirect' === $error ) {
+			$error = 'offsite_redirect';
 		}
 
-		$elapsed = (int) round( ( microtime( true ) - $start ) * 1000 );
 		return array(
-			'ok' => false, 'status_code' => 0, 'response_ms' => $elapsed, 'total_bytes' => 0,
-			'headers' => array(), 'body' => '', 'error' => 'too_many_redirects', 'host' => $origin_host,
+			'ok'          => ! empty( $fetched['ok'] ),
+			'status_code' => (int) ( $fetched['status_code'] ?? 0 ),
+			'response_ms' => (int) ( $fetched['response_ms'] ?? 0 ),
+			'total_bytes' => (int) ( $fetched['source_bytes'] ?? 0 ),
+			'headers'     => (array) ( $fetched['headers'] ?? array() ),
+			'body'        => (string) ( $fetched['body'] ?? '' ),
+			'error'       => $error ?: null,
+			'host'        => (string) ( $fetched['host'] ?? wp_parse_url( $url, PHP_URL_HOST ) ),
 		);
 	}
 

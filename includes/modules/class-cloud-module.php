@@ -26,12 +26,26 @@ class EMCP_Tools_Cloud_Module extends EMCP_Tools_Module {
 		return 'free';
 	}
 
+	/** Modules screen group. */
+	public function group(): string {
+		return 'site';
+	}
+
+	/** Modules screen icon. */
+	public function icon(): string {
+		return 'cloud';
+	}
+
 	public function default_active(): bool {
 		return true;
 	}
 
 	public function register(): void {
 		EMCP_Tools_Cloud_Connect::init();
+		if ( defined( 'WP_CLI' ) && WP_CLI ) {
+			require_once EMCP_TOOLS_DIR . 'includes/cloud/class-cloud-onboarding.php';
+			WP_CLI::add_command( 'emcp cloud onboard', array( 'EMCP_Tools_Cloud_Onboarding', 'command' ) );
+		}
 	}
 
 	public function render_settings(): void {

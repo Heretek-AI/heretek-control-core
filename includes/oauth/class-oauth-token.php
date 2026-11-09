@@ -111,21 +111,32 @@ class EMCP_Tools_OAuth_Token {
 		$verifier     = (string) ( $p['code_verifier'] ?? '' );
 		$resource     = (string) ( $p['resource'] ?? '' );
 
-		$payload = ( '' === $code ) ? null : EMCP_Tools_OAuth_Store::consume_code( $code );
-		$check   = self::validate_code_exchange( $payload, $client_id, $redirect_uri, $verifier, $resource );
-		if ( is_wp_error( $check ) ) {
-			return self::error( $check->get_error_code(), $check->get_error_message() );
+		if ( '' === $client_id || ! EMCP_Tools_OAuth_Store::acquire_client_token_lock( $client_id ) ) {
+			return self::error( 'temporarily_unavailable', 'Token exchange is temporarily busy. Please retry.', 503 );
 		}
 
-		$bound_resource = (string) ( $payload['resource'] ?? EMCP_Tools_OAuth_Metadata::resource() );
-		$pair           = self::issue_pair( $client_id, (int) $payload['user_id'], (string) $payload['scopes'], $bound_resource );
-		if ( '' === $pair['access'] || '' === $pair['refresh'] ) {
-			return self::error( 'server_error', 'The authorization server could not persist the issued token. Please try again; if it persists, check the database and the site error log.', 500 );
+		try {
+			if ( null === EMCP_Tools_OAuth_Store::get_client( $client_id ) ) {
+				return self::error( 'invalid_client', 'Client registration no longer exists.' );
+			}
+			$payload = ( '' === $code ) ? null : EMCP_Tools_OAuth_Store::consume_code( $code );
+			$check   = self::validate_code_exchange( $payload, $client_id, $redirect_uri, $verifier, $resource );
+			if ( is_wp_error( $check ) ) {
+				return self::error( $check->get_error_code(), $check->get_error_message() );
+			}
+
+			$bound_resource = (string) ( $payload['resource'] ?? EMCP_Tools_OAuth_Metadata::resource() );
+			$pair           = self::issue_pair( $client_id, (int) $payload['user_id'], (string) $payload['scopes'], $bound_resource );
+			if ( '' === $pair['access'] || '' === $pair['refresh'] ) {
+				return self::error( 'server_error', 'The authorization server could not persist the issued token. Please try again; if it persists, check the database and the site error log.', 500 );
+			}
+			return new WP_REST_Response(
+				self::token_response( $pair['access'], $pair['refresh'], self::access_ttl(), (string) $payload['scopes'] ),
+				200
+			);
+		} finally {
+			EMCP_Tools_OAuth_Store::release_client_token_lock( $client_id );
 		}
-		return new WP_REST_Response(
-			self::token_response( $pair['access'], $pair['refresh'], self::access_ttl(), (string) $payload['scopes'] ),
-			200
-		);
 	}
 
 	/**
@@ -139,30 +150,37 @@ class EMCP_Tools_OAuth_Token {
 		$refresh_token = (string) ( $p['refresh_token'] ?? '' );
 		$client_id     = (string) ( $p['client_id'] ?? '' );
 		$resource      = (string) ( $p['resource'] ?? '' );
-
-		$row = ( '' === $refresh_token ) ? null : EMCP_Tools_OAuth_Store::find_token( $refresh_token, 'refresh' );
-		if ( null === $row || ! hash_equals( (string) $row['client_id'], $client_id ) ) {
-			return self::error( 'invalid_grant', 'Refresh token is invalid or expired.' );
-		}
-		$bound_resource = (string) ( $row['resource'] ?? EMCP_Tools_OAuth_Metadata::resource() );
-		if ( ! EMCP_Tools_OAuth_Metadata::resource_matches( $bound_resource ) || ( '' !== $resource && ! hash_equals( EMCP_Tools_OAuth_Metadata::normalize_resource_uri( $bound_resource ), EMCP_Tools_OAuth_Metadata::normalize_resource_uri( $resource ) ) ) ) {
-			return self::error( 'invalid_target', 'Refresh token was not issued for this MCP server.' );
+		if ( '' === $client_id || ! EMCP_Tools_OAuth_Store::acquire_client_token_lock( $client_id ) ) {
+			return self::error( 'temporarily_unavailable', 'Token rotation is temporarily busy. Please retry.', 503 );
 		}
 
-		// Rotate: retire the old refresh token, but (a) leave its bound access
-		// token to expire on its own TTL so in-flight requests aren't 401'd
-		// mid-chat, and (b) keep the retired refresh token usable for a short
-		// grace window so a lost-response retry re-rotates instead of 401'ing.
-		EMCP_Tools_OAuth_Store::rotate_out_refresh( (int) $row['id'], self::refresh_grace() );
-		$pair = self::issue_pair( $client_id, (int) $row['user_id'], (string) $row['scopes'], $bound_resource );
-		if ( '' === $pair['access'] || '' === $pair['refresh'] ) {
-			return self::error( 'server_error', 'The authorization server could not persist the rotated token. Please try again; if it persists, check the database and the site error log.', 500 );
-		}
+		try {
+			$row = ( '' === $refresh_token ) ? null : EMCP_Tools_OAuth_Store::find_token( $refresh_token, 'refresh' );
+			if ( null === $row || ! hash_equals( (string) $row['client_id'], $client_id ) ) {
+				return self::error( 'invalid_grant', 'Refresh token is invalid or expired.' );
+			}
+			$bound_resource = (string) ( $row['resource'] ?? EMCP_Tools_OAuth_Metadata::resource() );
+			if ( ! EMCP_Tools_OAuth_Metadata::resource_matches( $bound_resource ) || ( '' !== $resource && ! hash_equals( EMCP_Tools_OAuth_Metadata::normalize_resource_uri( $bound_resource ), EMCP_Tools_OAuth_Metadata::normalize_resource_uri( $resource ) ) ) ) {
+				return self::error( 'invalid_target', 'Refresh token was not issued for this MCP server.' );
+			}
 
-		return new WP_REST_Response(
-			self::token_response( $pair['access'], $pair['refresh'], self::access_ttl(), (string) $row['scopes'] ),
-			200
-		);
+			// Rotate: retire the old refresh token, but (a) leave its bound access
+			// token to expire on its own TTL so in-flight requests aren't 401'd
+			// mid-chat, and (b) keep the retired refresh token usable for a short
+			// grace window so a lost-response retry re-rotates instead of 401'ing.
+			EMCP_Tools_OAuth_Store::rotate_out_refresh( (int) $row['id'], self::refresh_grace() );
+			$pair = self::issue_pair( $client_id, (int) $row['user_id'], (string) $row['scopes'], $bound_resource );
+			if ( '' === $pair['access'] || '' === $pair['refresh'] ) {
+				return self::error( 'server_error', 'The authorization server could not persist the rotated token. Please try again; if it persists, check the database and the site error log.', 500 );
+			}
+
+			return new WP_REST_Response(
+				self::token_response( $pair['access'], $pair['refresh'], self::access_ttl(), (string) $row['scopes'] ),
+				200
+			);
+		} finally {
+			EMCP_Tools_OAuth_Store::release_client_token_lock( $client_id );
+		}
 	}
 
 	/**
@@ -177,7 +195,21 @@ class EMCP_Tools_OAuth_Token {
 			foreach ( array( 'access', 'refresh' ) as $type ) {
 				$row = EMCP_Tools_OAuth_Store::find_token( $token, $type );
 				if ( null !== $row ) {
-					EMCP_Tools_OAuth_Store::revoke_token( (int) $row['id'] );
+					$client_id = (string) $row['client_id'];
+					if ( ! EMCP_Tools_OAuth_Store::acquire_client_token_lock( $client_id ) ) {
+						return self::error( 'temporarily_unavailable', 'Token revocation is busy. Please retry.', 503 );
+					}
+					try {
+						// Re-read inside the same lock used by refresh rotation. A refresh
+						// that won the race has already retired this token; otherwise this
+						// delete also removes its bound access token.
+						$current = EMCP_Tools_OAuth_Store::find_token( $token, $type );
+						if ( null !== $current && hash_equals( $client_id, (string) $current['client_id'] ) ) {
+							EMCP_Tools_OAuth_Store::revoke_token( (int) $current['id'] );
+						}
+					} finally {
+						EMCP_Tools_OAuth_Store::release_client_token_lock( $client_id );
+					}
 					break;
 				}
 			}
@@ -255,7 +287,7 @@ class EMCP_Tools_OAuth_Token {
 	 * @return array{access:string,refresh:string}
 	 */
 	private static function issue_pair( string $client_id, int $user_id, string $scope, string $resource ): array {
-		$refresh = EMCP_Tools_OAuth_Store::issue_token( 'refresh', $client_id, $user_id, $scope, self::REFRESH_TTL, null, $resource );
+		$refresh = EMCP_Tools_OAuth_Store::issue_token( 'refresh', $client_id, $user_id, $scope, self::refresh_ttl( $client_id, $scope ), null, $resource );
 		if ( '' === $refresh['token'] ) {
 			return array( 'access' => '', 'refresh' => '' );
 		}
@@ -264,6 +296,21 @@ class EMCP_Tools_OAuth_Token {
 			return array( 'access' => '', 'refresh' => '' );
 		}
 		return array( 'access' => $access['token'], 'refresh' => $refresh['token'] );
+	}
+
+	/**
+	 * Refresh-token lifetime. The Gateway calls a site only when an agent does,
+	 * so a quiet site can go months between rotations: its token keeps the long
+	 * life it was issued with, or the first rotation cuts it to 30 days and the
+	 * site needs a reconnect after a quiet month.
+	 *
+	 * @param string $client_id Client id.
+	 * @param string $scope     Granted scope.
+	 * @return int Seconds.
+	 */
+	private static function refresh_ttl( string $client_id, string $scope ): int {
+		$gateway = EMCP_Tools_Gateway_Credential::SCOPE === $scope && EMCP_Tools_Gateway_Credential::is_gateway_client( $client_id );
+		return $gateway ? EMCP_Tools_Gateway_Credential::REFRESH_TTL : self::REFRESH_TTL;
 	}
 
 	/**

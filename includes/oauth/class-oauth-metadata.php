@@ -205,16 +205,34 @@ class EMCP_Tools_OAuth_Metadata {
 	 * @param WP $wp Current WordPress environment (unused).
 	 */
 	public static function maybe_serve( $wp = null ): void {
+		$path = self::request_path();
+
+		// Subdirectory multisite: a subsite's issuer is https://host/<path>, so
+		// RFC 8414 clients ask the network root for
+		// /.well-known/oauth-authorization-server/<path>, and WordPress hands
+		// that request to the main site. Answer for the subsite here. Checked
+		// before this site's own OAuth switch: the main site may have OAuth off
+		// while its subsites have it on.
+		if ( 0 === strpos( $path, self::PATH_AUTH_SERVER . '/' ) ) {
+			$doc = self::subsite_authorization_server_document( substr( $path, strlen( self::PATH_AUTH_SERVER ) ) );
+			if ( null !== $doc ) {
+				self::emit( $doc );
+			}
+		}
+
 		if ( ! EMCP_Tools_OAuth_Server::is_enabled() ) {
 			return;
 		}
-		$path = self::request_path();
 
 		// Match both the root well-known path and the resource-scoped variant
-		// clients build by appending the resource path, e.g.
+		// clients build by appending OUR resource path, e.g.
 		// /.well-known/oauth-protected-resource/wp-json/mcp/emcp-tools-server
 		// (RFC 9728 §3.1). Exact-match-only 404s the request real MCP clients
-		// actually make, which silently breaks OAuth discovery.
+		// actually make, which silently breaks OAuth discovery. Any OTHER suffix
+		// belongs to another authorization server on this host (a second MCP
+		// plugin with a path-based issuer, RFC 8414 §3.1) and must fall through
+		// so that plugin can answer; claiming it hands the client a document
+		// whose issuer does not match and the flow dies before consent.
 		if ( self::path_matches( $path, self::PATH_PROTECTED_RESOURCE ) ) {
 			self::emit( self::protected_resource_document() );
 		}
@@ -224,15 +242,100 @@ class EMCP_Tools_OAuth_Metadata {
 	}
 
 	/**
-	 * Whether a request path is the given well-known path or a resource-scoped
-	 * variant of it (the well-known path followed by a "/…" resource path).
+	 * The authorization-server document of the subdirectory subsite named by a
+	 * path-inserted well-known suffix, or null when this request is not for an
+	 * EMCP subsite on this network.
 	 *
-	 * @param string $path     Request path.
+	 * Returns null unless the suffix names an exact, live subsite of this
+	 * subdirectory network, EMCP is active there with OAuth on, and that
+	 * subsite's issuer is the one the client derived the path from (a subsite
+	 * with a Server URL override on another host is discovered there instead).
+	 *
+	 * @since 3.20.1
+	 *
+	 * @param string $suffix Path after the well-known prefix, e.g. "/grand-jury".
+	 * @return array|null
+	 */
+	public static function subsite_authorization_server_document( string $suffix ): ?array {
+		if ( ! is_multisite() || is_subdomain_install() ) {
+			return null;
+		}
+		$suffix = trim( $suffix, '/' );
+		if ( '' === $suffix ) {
+			return null;
+		}
+
+		$current   = get_site();
+		$site_path = '/' . $suffix . '/';
+		$site      = $current ? get_site_by_path( $current->domain, $site_path ) : null;
+		if ( ! $site || $site_path !== $site->path || (int) $site->blog_id === get_current_blog_id()
+			|| ! empty( $site->deleted ) || ! empty( $site->archived ) || ! empty( $site->spam ) ) {
+			return null;
+		}
+
+		$home     = wp_parse_url( home_url() );
+		$expected = ( $home['scheme'] ?? 'https' ) . '://' . ( $home['host'] ?? '' ) . ( isset( $home['port'] ) ? ':' . (int) $home['port'] : '' ) . '/' . $suffix;
+
+		switch_to_blog( (int) $site->blog_id );
+		try {
+			if ( ! self::active_on_current_site() || ! EMCP_Tools_OAuth_Server::is_enabled() ) {
+				return null;
+			}
+			$doc = self::authorization_server_document();
+			return self::identifier_matches( (string) $doc['issuer'], $expected ) ? $doc : null;
+		} finally {
+			restore_current_blog();
+		}
+	}
+
+	/** Whether this plugin is active on the current (possibly switched-to) site. */
+	private static function active_on_current_site(): bool {
+		if ( ! defined( 'EMCP_TOOLS_BASENAME' ) ) {
+			return false;
+		}
+		$network = (array) get_site_option( 'active_sitewide_plugins', array() );
+		return isset( $network[ EMCP_TOOLS_BASENAME ] )
+			|| in_array( EMCP_TOOLS_BASENAME, (array) get_option( 'active_plugins', array() ), true );
+	}
+
+	/**
+	 * Whether a request path is the given well-known path or the resource-scoped
+	 * variant of it for EMCP's OWN resource (the well-known path followed by
+	 * one of own_resource_paths()). A well-known path followed by any other
+	 * resource path is another server's discovery request and is not matched.
+	 *
+	 * @param string $path      Request path (site-root-relative, no trailing slash).
 	 * @param string $wellknown Base well-known path.
 	 * @return bool
 	 */
 	public static function path_matches( string $path, string $wellknown ): bool {
-		return $path === $wellknown || 0 === strpos( $path, $wellknown . '/' );
+		if ( $path === $wellknown ) {
+			return true;
+		}
+		if ( 0 !== strpos( $path, $wellknown . '/' ) ) {
+			return false;
+		}
+		$suffix = untrailingslashit( substr( $path, strlen( $wellknown ) ) );
+		return in_array( $suffix, self::own_resource_paths(), true );
+	}
+
+	/**
+	 * The resource path suffixes that identify EMCP's own MCP endpoint in a
+	 * resource-scoped well-known request: the path of resource() as advertised,
+	 * plus its site-root-relative form for subdirectory installs, where the
+	 * request arrives home-path-stripped (see request_path()).
+	 *
+	 * @since 3.17.1
+	 *
+	 * @return string[] Paths starting with "/", no trailing slash.
+	 */
+	public static function own_resource_paths(): array {
+		$resource = (string) wp_parse_url( self::resource(), PHP_URL_PATH );
+		$resource = '/' . ltrim( untrailingslashit( $resource ), '/' );
+		$paths    = array( $resource, self::normalize_request_path( $resource ) );
+		return array_values( array_unique( array_filter( $paths, static function ( $p ) {
+			return '' !== $p && '/' !== $p;
+		} ) ) );
 	}
 
 	/**
@@ -241,7 +344,7 @@ class EMCP_Tools_OAuth_Metadata {
 	 * @return string
 	 */
 	private static function request_path(): string {
-		$uri  = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : '';
+		$uri  = isset( $_SERVER['REQUEST_URI'] ) && is_string( $_SERVER['REQUEST_URI'] ) ? esc_url_raw( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
 		$path = (string) wp_parse_url( $uri, PHP_URL_PATH );
 
 		// Subdirectory installs (e.g. WordPress at /gpt-build/) receive the request

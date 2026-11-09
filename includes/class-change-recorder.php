@@ -108,7 +108,15 @@ class EMCP_Tools_Change_Recorder {
 			return '';
 		}
 		$rb               = self::attach_before( array( 'type' => 'post-fields', 'post_id' => $post_id ), array( 'before' => $before ) );
-		$rb['after_hash'] = self::hash_post( $post_id );
+		$rb['after_scope'] = array(
+			'fields' => array_keys( (array) ( $before['fields'] ?? array() ) ),
+			'meta'   => array_values( array_unique( array_merge(
+				array_keys( (array) ( $before['meta'] ?? array() ) ),
+				array_keys( (array) ( $before['meta_rows'] ?? array() ) )
+			) ) ),
+			'terms'  => array_keys( (array) ( $before['terms'] ?? array() ) ),
+		);
+		$rb['after_hash'] = self::hash_post_scope( $post_id, $rb['after_scope'] );
 		return EMCP_Tools_Change_Log::record( array(
 			'domain'   => $domain,
 			'action'   => $action,
@@ -139,6 +147,104 @@ class EMCP_Tools_Change_Recorder {
 		) );
 	}
 
+	/** Record a complete page/upload creation, guarded against subsequent edits. */
+	public static function record_resource_create( int $post_id, string $domain, string $action ): string {
+		if ( EMCP_Tools_Change_Log::$suppress ) {
+			return '';
+		}
+		return EMCP_Tools_Change_Log::record( array(
+			'domain' => $domain,
+			'action' => $action,
+			'target' => get_the_title( $post_id ) . ' (#' . $post_id . ')',
+			'summary' => sprintf( 'Created %s #%d', $domain === 'media' ? 'attachment' : 'Elementor page', $post_id ),
+			'rollback' => array(
+				'type' => 'post-create',
+				'post_id' => $post_id,
+				'creation_guard' => true,
+				'created_files' => 'attachment' === ( get_post( $post_id )->post_type ?? '' ) ? self::attachment_files( $post_id ) : array(),
+				'after_hash' => self::hash_created_resource( $post_id ),
+			),
+		) );
+	}
+
+	/** Core-owned attachment files, including scaled originals and editor backups. */
+	public static function attachment_files( int $post_id ): array {
+		$main = (string) get_attached_file( $post_id );
+		if ( '' === $main ) {
+			return array();
+		}
+		$paths = array( $main );
+		$dir = dirname( $main );
+		$metadata = (array) wp_get_attachment_metadata( $post_id );
+		foreach ( array_merge( (array) ( $metadata['sizes'] ?? array() ), (array) get_post_meta( $post_id, '_wp_attachment_backup_sizes', true ) ) as $size ) {
+			if ( ! empty( $size['file'] ) ) {
+				$paths[] = $dir . '/' . $size['file'];
+			}
+		}
+		foreach ( array( 'original_image', 'source_image', 'animated_video', 'animated_video_poster', 'thumb' ) as $key ) {
+			if ( ! empty( $metadata[ $key ] ) && is_string( $metadata[ $key ] ) ) {
+				$paths[] = $dir . '/' . $metadata[ $key ];
+			}
+		}
+		$paths = array_values( array_unique( $paths ) );
+		sort( $paths );
+		return $paths;
+	}
+
+	/** Hash current core fields, all persisted metadata/terms and attachment bytes. */
+	public static function hash_created_resource( int $post_id ): string {
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return '';
+		}
+		$fields = (array) $post;
+		// Edit timestamps and generated caches do not represent content changes.
+		unset( $fields['post_modified'], $fields['post_modified_gmt'], $fields['filter'] );
+		// WordPress advances the local date of an undated draft on every save,
+		// including undo of an unrelated field. A real assigned date has GMT.
+		if ( '0000-00-00 00:00:00' === ( $fields['post_date_gmt'] ?? '' ) && in_array( $fields['post_status'] ?? '', array( 'draft', 'pending', 'auto-draft' ), true ) ) {
+			unset( $fields['post_date'] );
+		}
+		$meta = (array) get_post_meta( $post_id );
+		foreach ( array( '_edit_lock', '_edit_last', '_elementor_css', '_elementor_element_cache', '_elementor_page_assets' ) as $key ) {
+			unset( $meta[ $key ] );
+		}
+		// Elementor records its data migrations per page when the page renders; viewing a page is not a change.
+		foreach ( array_keys( $meta ) as $key ) {
+			if ( 0 === strpos( (string) $key, '_elementor_migrations_state' ) ) {
+				unset( $meta[ $key ] );
+			}
+		}
+		$terms = array();
+		foreach ( get_object_taxonomies( (string) ( $post->post_type ?? 'post' ) ) as $tax ) {
+			$ids = wp_get_object_terms( $post_id, $tax, array( 'fields' => 'ids' ) );
+			if ( is_wp_error( $ids ) ) {
+				return '';
+			}
+			$ids = array_map( 'intval', $ids );
+			sort( $ids );
+			$terms[ $tax ] = $ids;
+		}
+		$files = array();
+		if ( 'attachment' === ( $post->post_type ?? '' ) ) {
+			foreach ( self::attachment_files( $post_id ) as $path ) {
+				$digest = is_file( $path ) ? hash_file( 'sha256', $path ) : false;
+				if ( false === $digest ) {
+					return '';
+				}
+				$files[ $path ] = $digest;
+			}
+			if ( empty( $files ) ) {
+				return '';
+			}
+		}
+		ksort( $fields );
+		ksort( $meta );
+		ksort( $terms );
+		$json = wp_json_encode( array( $fields, $meta, $terms, $files ) );
+		return false === $json ? '' : hash( 'sha256', $json );
+	}
+
 	/**
 	 * Record a post deletion. A trash is undone by untrashing; a force-delete is
 	 * undone by re-inserting from the snapshot (post + meta + terms).
@@ -156,6 +262,11 @@ class EMCP_Tools_Change_Recorder {
 		}
 		if ( $forced ) {
 			$rb = self::attach_before( array( 'type' => 'post-restore', 'mode' => 'reinsert' ), array( 'snapshot' => $snapshot ) );
+			// wp_delete_post() also accepts attachments, but a generic post
+			// snapshot has no backup of the files WordPress deletes with them.
+			if ( 'attachment' === ( $snapshot['post']['post_type'] ?? '' ) ) {
+				$rb['partial'] = true;
+			}
 		} else {
 			$rb = array( 'type' => 'post-restore', 'mode' => 'untrash', 'post_id' => $post_id );
 		}
@@ -300,6 +411,8 @@ class EMCP_Tools_Change_Recorder {
 			return '';
 		}
 		$rb = self::attach_before( array( 'type' => 'user-fields', 'user_id' => $user_id ), array( 'before' => $before ) );
+		$rb['field_keys'] = array_keys( $before );
+		$rb['after_hash'] = self::hash_user_fields( $user_id, $rb['field_keys'] );
 		return EMCP_Tools_Change_Log::record( array(
 			'domain'   => 'users',
 			'action'   => 'update-user',
@@ -324,6 +437,8 @@ class EMCP_Tools_Change_Recorder {
 			return '';
 		}
 		$rb = self::attach_before( array( 'type' => 'acf-fields', 'acf_target' => $acf_target ), array( 'before' => $before ) );
+		$rb['field_keys'] = array_keys( $before );
+		$rb['after_hash'] = self::hash_acf_fields( $acf_target, $rb['field_keys'] );
 		return EMCP_Tools_Change_Log::record( array(
 			'domain'   => 'acf',
 			'action'   => 'update-fields',
@@ -469,6 +584,21 @@ class EMCP_Tools_Change_Recorder {
 		return array_merge( $rb, $heavy );
 	}
 
+	/**
+	 * The rollback ref with its offloaded before-image merged back in (the inverse of
+	 * attach_before()). A ref without a blob, or whose blob is gone, is returned unchanged.
+	 *
+	 * @param array $rb Rollback ref.
+	 * @return array
+	 */
+	public static function resolve_before( array $rb ): array {
+		if ( empty( $rb['blob_id'] ) || ! class_exists( 'EMCP_Tools_Change_Blobs' ) ) {
+			return $rb;
+		}
+		$heavy = EMCP_Tools_Change_Blobs::get( (string) $rb['blob_id'] );
+		return is_array( $heavy ) ? array_merge( $rb, $heavy ) : $rb;
+	}
+
 	// ---------------------------------------------------------------------
 	// State hashes (conflict guard)
 	// ---------------------------------------------------------------------
@@ -505,6 +635,73 @@ class EMCP_Tools_Change_Recorder {
 			(int) ( $p->post_parent ?? 0 ),
 			(int) ( $p->menu_order ?? 0 ),
 		) ) );
+	}
+
+	/**
+	 * Hash exactly the state a post-fields inverse will replace. Meta uses all
+	 * rows so absence, empty values and duplicate rows have distinct hashes.
+	 * An empty hash signals an unreadable resource, never an absent conflict.
+	 *
+	 * @param int   $post_id Post id.
+	 * @param array $scope   Lists of field, meta and taxonomy names.
+	 * @return string
+	 */
+	public static function hash_post_scope( int $post_id, array $scope ): string {
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return '';
+		}
+		$state = array( 'fields' => array(), 'meta' => array(), 'terms' => array() );
+		foreach ( (array) ( $scope['fields'] ?? array() ) as $key ) {
+			$state['fields'][ $key ] = isset( $post->$key ) ? (string) $post->$key : null;
+		}
+		foreach ( (array) ( $scope['meta'] ?? array() ) as $key ) {
+			$state['meta'][ $key ] = get_post_meta( $post_id, (string) $key, false );
+		}
+		foreach ( (array) ( $scope['terms'] ?? array() ) as $tax ) {
+			$ids = wp_get_object_terms( $post_id, (string) $tax, array( 'fields' => 'ids' ) );
+			if ( is_wp_error( $ids ) ) {
+				return '';
+			}
+			$ids = array_map( 'intval', (array) $ids );
+			sort( $ids, SORT_NUMERIC );
+			$state['terms'][ $tax ] = $ids;
+		}
+		foreach ( $state as &$part ) {
+			ksort( $part );
+		}
+		unset( $part );
+		$json = wp_json_encode( $state );
+		return false === $json ? '' : hash( 'sha256', $json );
+	}
+
+	/** Hash the profile fields replaced by a user update. */
+	public static function hash_user_fields( int $user_id, array $keys ): string {
+		$user = get_userdata( $user_id );
+		if ( ! $user ) {
+			return '';
+		}
+		sort( $keys );
+		$state = array();
+		foreach ( $keys as $key ) {
+			$state[ $key ] = (string) ( $user->$key ?? '' );
+		}
+		$json = wp_json_encode( $state );
+		return false === $json ? '' : hash( 'sha256', $json );
+	}
+
+	/** Hash raw ACF values, using the same field keys as the saved snapshot. */
+	public static function hash_acf_fields( $target, array $keys ): string {
+		if ( ! function_exists( 'get_field' ) ) {
+			return '';
+		}
+		sort( $keys );
+		$state = array();
+		foreach ( $keys as $key ) {
+			$state[ $key ] = get_field( (string) $key, $target, false );
+		}
+		$json = wp_json_encode( $state );
+		return false === $json ? '' : hash( 'sha256', $json );
 	}
 
 	/**

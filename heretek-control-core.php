@@ -3,7 +3,7 @@
  * Plugin Name:       Heretek Control Core
  * Plugin URI:        https://github.com/Heretek-AI/heretek-control-core
  * Description:       Autonomous Model Context Protocol (MCP) server connecting site builders, themes, and content management to AI assistants (Claude, Cursor, ChatGPT, Antigravity).
- * Version:           3.16.1
+ * Version:           3.21.3
  * Requires at least: 6.9
  * Tested up to:      7.1
  * Requires PHP:      8.1
@@ -216,7 +216,7 @@ if ( EMCP_Tools_Migration::is_legacy_plugin_active() ) {
 }
 
 // Plugin constants.
-define( 'EMCP_TOOLS_VERSION', '3.16.1' );
+define( 'EMCP_TOOLS_VERSION', '3.21.3' );
 define( 'HERETEK_CONTROL_CORE_VERSION', EMCP_TOOLS_VERSION );
 define( 'EMCP_TOOLS_DIR', plugin_dir_path( __FILE__ ) );
 define( 'HERETEK_CONTROL_CORE_DIR', EMCP_TOOLS_DIR );
@@ -225,9 +225,61 @@ define( 'HERETEK_CONTROL_CORE_URL', EMCP_TOOLS_URL );
 define( 'EMCP_TOOLS_BASENAME', plugin_basename( __FILE__ ) );
 define( 'HERETEK_CONTROL_CORE_BASENAME', EMCP_TOOLS_BASENAME );
 
-// Claim the WP\MCP namespace for our bundled MCP Adapter copy, at file-load.
+// While the official MCP Adapter plugin is active, serve the whole WP\MCP
+// namespace from it, at file load, before another plugin's bundled copy can
+// answer for part of it (a mixed copy kills the MCP session, #99).
 require_once EMCP_TOOLS_DIR . 'includes/class-mcp-adapter-bootstrap.php';
-EMCP_Tools_Adapter_Bootstrap::preload_bundled_namespace();
+EMCP_Tools_Adapter_Bootstrap::preload_namespace();
+
+if ( ! function_exists( 'emcp_tools_fs_guard_main_file' ) ) {
+	/**
+	 * Keep Freemius pointed at EMCP's own main file.
+	 *
+	 * @param string $main_file Absolute path to this file.
+	 */
+	function emcp_tools_fs_guard_main_file( $main_file ) {
+		if ( ! class_exists( 'FS_Options' ) || ! class_exists( 'FS_Storage' ) || ! defined( 'WP_FS__ACCOUNTS_OPTION_NAME' ) || ! function_exists( 'fs_normalize_path' ) ) {
+			return;
+		}
+		$main_file   = fs_normalize_path( $main_file );
+		$plugins_dir = fs_normalize_path( trailingslashit( WP_PLUGIN_DIR ) );
+		if ( 0 !== strpos( $main_file, $plugins_dir ) ) {
+			return;
+		}
+		$relative = substr( $main_file, strlen( $plugins_dir ) );
+		$is_ours = static function ( $path ) use ( $main_file, $plugins_dir ) {
+			$path = fs_normalize_path( (string) $path );
+			if ( '' !== $path && 0 !== strpos( $path, $plugins_dir ) ) {
+				$path = $plugins_dir . ltrim( $path, '/' );
+			}
+			return $path === $main_file;
+		};
+
+		$accounts = FS_Options::instance( WP_FS__ACCOUNTS_OPTION_NAME, true );
+		$map      = $accounts->get_option( 'id_slug_type_path_map', array() );
+		if ( ! is_array( $map ) ) {
+			$map = array();
+		}
+		$entry = isset( $map[30577] ) && is_array( $map[30577] ) ? $map[30577] : array();
+		if ( empty( $entry['path'] ) || ! $is_ours( $entry['path'] ) || empty( $entry['slug'] ) || 'emcp-tools' !== $entry['slug'] ) {
+			$map[30577] = array(
+				'slug' => 'emcp-tools',
+				'type' => 'plugin',
+				'path' => $relative,
+			);
+			$accounts->set_option( 'id_slug_type_path_map', $map, true );
+		}
+
+		$storage = FS_Storage::instance( 'plugin', 'emcp-tools' );
+		$cached  = $storage->get( 'plugin_main_file' );
+		if ( is_object( $cached ) && ! empty( $cached->path ) && ! $is_ours( $cached->path ) ) {
+			$fixed       = clone $cached;
+			$fixed->path = $relative;
+			unset( $fixed->prev_path );
+			$storage->store( 'plugin_main_file', $fixed );
+		}
+	}
+}
 
 if ( ! function_exists( 'emcp_tools_fs' ) ) {
 	if ( file_exists( dirname( __FILE__ ) . '/includes/vendors/fremius/start.php' ) && ! defined( 'EMCP_WPORG_BUILD' ) ) {
@@ -240,6 +292,7 @@ if ( ! function_exists( 'emcp_tools_fs' ) ) {
 				}
 
 				require_once dirname( __FILE__ ) . '/includes/vendors/fremius/start.php';
+				emcp_tools_fs_guard_main_file( __FILE__ );
 
 				$emcp_tools_is_premium = file_exists( dirname( __FILE__ ) . '/.emcp-pro' );
 
@@ -356,6 +409,10 @@ require_once EMCP_TOOLS_DIR . 'includes/class-uninstaller.php';
 if ( function_exists( 'emcp_tools_fs' ) && method_exists( emcp_tools_fs(), 'add_action' ) ) {
 	emcp_tools_fs()->add_action( 'after_uninstall', array( 'EMCP_Tools_Uninstaller', 'run' ) );
 }
+
+// Deactivation stops EMCP's recurring maintenance events.
+require_once EMCP_TOOLS_DIR . 'includes/class-deactivator.php';
+register_deactivation_hook( __FILE__, array( 'EMCP_Tools_Deactivator', 'run' ) );
 
 if ( ! function_exists( 'emcp_tools_upgrade_url' ) ) {
 	function emcp_tools_upgrade_url(): string {

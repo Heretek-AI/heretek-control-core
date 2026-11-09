@@ -17,8 +17,10 @@ class EMCP_Tools_Cloud {
 	const OPTION_CONNECTION = 'emcp_tools_cloud_connection';
 	const OPTION_BASE_URL   = 'emcp_tools_cloud_base_url';
 	const OPTION_SITE_UUID  = 'emcp_tools_site_uuid';
+	const OPTION_IDENTITY_BASE = 'emcp_tools_cloud_identity_base';
 	const DEFAULT_BASE_URL  = 'https://emcptools.com';
-	const SCOPES            = 'openid cloud offline_access';
+	// email: the Connection screen shows which account the site is linked to.
+	const SCOPES            = 'openid email cloud offline_access';
 
 	/**
 	 * The EMCP Cloud base URL. Constant overrides option overrides default;
@@ -46,6 +48,7 @@ class EMCP_Tools_Cloud {
 		if ( '' === $uuid ) {
 			$uuid = wp_generate_uuid4();
 			update_option( self::OPTION_SITE_UUID, $uuid, false );
+			update_option( self::OPTION_IDENTITY_BASE, self::installation_base(), false );
 		}
 		return $uuid;
 	}
@@ -57,7 +60,39 @@ class EMCP_Tools_Cloud {
 	 * @return void
 	 */
 	public static function save_connection( array $bundle ): void {
+		// Store the installation identity alongside credentials, so a copied
+		// database cannot silently use the source site's Cloud authorization.
+		if ( ! isset( $bundle['installation_base'] ) ) {
+			$bundle['installation_base'] = self::installation_base();
+		}
+		update_option( self::OPTION_IDENTITY_BASE, $bundle['installation_base'], false );
 		update_option( self::OPTION_CONNECTION, EMCP_Tools_Secret::encrypt( (string) wp_json_encode( $bundle ) ), false );
+	}
+
+	public static function installation_base(): string {
+		return rtrim( (string) home_url(), '/' );
+	}
+
+	public static function identity_conflict(): bool {
+		$bound = (string) get_option( self::OPTION_IDENTITY_BASE, '' );
+		return '' !== $bound && $bound !== self::installation_base();
+	}
+
+	/** Whether this connection carries the marker that lets a copy be told from the original. */
+	public static function identity_bound(): bool {
+		return '' !== (string) get_option( self::OPTION_IDENTITY_BASE, '' );
+	}
+
+	/** Detach this copy locally. Never revoke the source's Cloud connection. */
+	public static function separate_identity(): void {
+		self::clear_connection();
+		if ( class_exists( 'EMCP_Tools_Gateway_Credential' ) ) {
+			EMCP_Tools_Gateway_Credential::clear_local();
+		}
+		delete_transient( EMCP_Tools_Cloud_Connect::PENDING_TRANSIENT );
+		delete_option( 'emcp_tools_gateway_provisioned' );
+		update_option( self::OPTION_SITE_UUID, wp_generate_uuid4(), false );
+		update_option( self::OPTION_IDENTITY_BASE, self::installation_base(), false );
 	}
 
 	/**
@@ -66,6 +101,9 @@ class EMCP_Tools_Cloud {
 	 * @return array
 	 */
 	public static function get_connection(): array {
+		if ( self::identity_conflict() ) {
+			return array();
+		}
 		$raw = (string) get_option( self::OPTION_CONNECTION, '' );
 		if ( '' === $raw ) {
 			return array();
@@ -87,6 +125,34 @@ class EMCP_Tools_Cloud {
 	public static function is_connected(): bool {
 		$c = self::get_connection();
 		return ! empty( $c['access_token'] ) || ! empty( $c['refresh_token'] );
+	}
+
+	/**
+	 * The linked account's email, stored at connect time ('' when the
+	 * connection predates the email scope or the Cloud did not send one).
+	 *
+	 * @return string
+	 */
+	public static function account_email(): string {
+		$c = self::get_connection();
+		return (string) ( $c['account_email'] ?? '' );
+	}
+
+	/**
+	 * An email with most of its local part hidden (mi•••@gmail.com), for
+	 * screens that only need to say which account this is.
+	 *
+	 * @param string $email Email address.
+	 * @return string '' when it is not an email.
+	 */
+	public static function redact_email( string $email ): string {
+		$at = strrpos( $email, '@' );
+		if ( false === $at || 0 === $at || ! is_email( $email ) ) {
+			return '';
+		}
+		$local = substr( $email, 0, $at );
+		$keep  = strlen( $local ) > 2 ? 2 : 1;
+		return substr( $local, 0, $keep ) . '•••' . substr( $email, $at );
 	}
 
 	/**

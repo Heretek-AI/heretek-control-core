@@ -165,6 +165,7 @@ class EMCP_Tools_Widget_Abilities {
 					'properties' => array(
 						'element_id'  => array( 'type' => 'string' ),
 						'widget_type' => array( 'type' => 'string' ),
+						'warnings' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 				'meta'                => array(
@@ -196,6 +197,7 @@ class EMCP_Tools_Widget_Abilities {
 					'properties' => array(
 						'element_id'  => array( 'type' => 'string' ),
 						'widget_type' => array( 'type' => 'string' ),
+						'warnings' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 				'meta'                => array(
@@ -332,6 +334,10 @@ class EMCP_Tools_Widget_Abilities {
 			);
 		}
 
+		// Partial classic dimensions are left out of a new element (#151).
+		$guard    = EMCP_Tools_Element_Factory::guard_settings( (array) $settings, null, array( 'elType' => 'widget', 'widgetType' => $widget_type ) );
+		$settings = $guard['settings'];
+
 		// Validate settings if provided.
 		if ( ! empty( $settings ) ) {
 			$valid = $this->validator->validate( $widget_type, $settings );
@@ -363,6 +369,8 @@ class EMCP_Tools_Widget_Abilities {
 		return array(
 			'element_id'  => $widget['id'],
 			'widget_type' => $widget_type,
+			// Keys that are not controls are saved but likely ignored (#152).
+			'warnings'    => array_merge( $guard['warnings'], EMCP_Tools_Widget_Setting_Keys::warnings( $widget_type, (array) $settings ) ),
 		);
 	}
 
@@ -404,6 +412,7 @@ class EMCP_Tools_Widget_Abilities {
 					'properties' => array(
 						'success'    => array( 'type' => 'boolean' ),
 						'element_id' => array( 'type' => 'string' ),
+						'warnings' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 				'meta'                => array(
@@ -452,6 +461,10 @@ class EMCP_Tools_Widget_Abilities {
 			return new \WP_Error( 'not_a_widget', __( 'Target element is not a widget.', 'emcp-tools' ) );
 		}
 
+		// Partial classic dimensions: fill from the stored value or skip (#151).
+		$guard    = EMCP_Tools_Element_Factory::guard_settings( (array) $settings, (array) ( $element['settings'] ?? array() ), $element );
+		$settings = $guard['settings'];
+
 		$updated = $this->data->update_element_settings( $page_data, $element_id, $settings );
 
 		if ( ! $updated ) {
@@ -467,6 +480,8 @@ class EMCP_Tools_Widget_Abilities {
 		return array(
 			'success'    => true,
 			'element_id' => $element_id,
+			// Keys that are not controls are saved but likely ignored (#152).
+			'warnings'   => array_merge( $guard['warnings'], EMCP_Tools_Widget_Setting_Keys::for_element( $element, (array) $settings ) ),
 		);
 	}
 

@@ -13,6 +13,7 @@
 /vendor/composer/*
 !/vendor/composer/InstalledVersions.php
 !/vendor/composer/installed.json
+!/vendor/composer/LICENSE
 !/vendor/composer/jetpack_autoload_classmap.php
 !/vendor/composer/jetpack_autoload_filemap.php
 !/vendor/composer/jetpack_autoload_psr4.php
@@ -26,6 +27,10 @@
 /vendor/wordpress/mcp-adapter/*.dist
 /vendor/wordpress/mcp-adapter/phpstan.neon*
 /vendor/wordpress/mcp-adapter/phpcs.xml*
+/vendor/wordpress/mcp-adapter/.wordpress-org/
+/vendor/wordpress/mcp-adapter/bin/
+/vendor/wordpress/php-mcp-schema/docs/
+/vendor/wordpress/php-mcp-schema/resources/
 /vendor/wordpress/php-mcp-schema/tests/
 /vendor/wordpress/php-mcp-schema/generator/
 /vendor/wordpress/php-mcp-schema/.github/
@@ -49,6 +54,7 @@
 /vendor/**/SECURITY*.md
 /vendor/**/CHANGELOG*.md
 /vendor/**/CLAUDE.md
+/vendor/**/AGENTS.md
 /vendor/**/.wp-env*.json
 /vendor/wordpress/mcp-adapter/readme.txt
 /vendor/wordpress/php-mcp-schema/skill/
@@ -70,6 +76,7 @@ Thumbs.db
 # Claude Code local settings
 .claude/settings.local.json
 .claude/settings.json
+.claude/skills/
 
 #Tests
 releases/*
@@ -77,9 +84,19 @@ releases/*
 .mcp.json
 
 #Meta
-# Local-only working docs (superpowers specs/plans, design notes). Never ship
-# to GitHub or the release zip.
-docs/
+# Local working docs (superpowers specs/plans, design notes) remain ignored.
+# Release-facing integration guides are the only public files under docs/.
+/docs/*
+!/docs/ACF-MCP-COVERAGE.md
+!/docs/BRICKS-INTEGRATION.md
+!/docs/BREAKDANCE-INTEGRATION.md
+!/docs/AVADA-INTEGRATION.md
+!/docs/FLATSOME-INTEGRATION.md
+!/docs/DIVI-INTEGRATION.md
+!/docs/THRIVE-INTEGRATION.md
+!/docs/OXYGEN-INTEGRATION.md
+!/docs/KIRKI-INTEGRATION.md
+!/docs/GSAP-INTEGRATION.md
 .commandcode/
 
 # Fork: All Pro files are unlocked and tracked directly in the repo.
@@ -91,6 +108,7 @@ mitm_mcp_traffic.db
 
 # Playwright MCP + local test artifacts (never committed)
 .playwright-mcp/
+/scripts/e2e/.breakdance-*.json
 /services-final.png
 /services-page.png
 
@@ -109,3 +127,31 @@ PRODUCTION-SECURITY-HANDOVER-*.md
 # Release distribution builds
 dist/
 
+# Local Oxygen MCP verification artifacts
+/.oxygen-*.json
+/scripts/e2e/.oxygen-*.json
+/scripts/e2e/__pycache__/
+/scripts/e2e/.kirki-state.json
+
+!docs/WPBAKERY-INTEGRATION.md
+scripts/e2e/.wpbakery-state.json
+
+!docs/BEAVER-INTEGRATION.md
+scripts/e2e/.beaver-state.json
+
+!docs/BLOCKSY-INTEGRATION.md
+!docs/VISUAL-COMPOSER-INTEGRATION.md
+/scripts/e2e/visual-composer-*.json
+/scripts/e2e/visual-composer-*.txt
+scripts/e2e/otter-*.json
+!docs/OTTER-INTEGRATION.md
+!docs/RELEASE-3.17.0.md
+!docs/qa/
+
+# JavaScript build tooling (admin redesign)
+/node_modules/
+/test-results/
+/playwright-report/
+/.playwright-mcp/
+# Playwright auth cookies (live admin session; never commit)
+/tests-e2e/.auth/

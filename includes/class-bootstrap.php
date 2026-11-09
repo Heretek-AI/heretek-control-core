@@ -3,7 +3,7 @@
  * Plugin bootstrap: dependency check, class loading, and hook wiring.
  *
  * Hooked to `plugins_loaded` (priority 20) by the main plugin file. Everything
- * here is orchestration — loading class files and wiring them together — not
+ * here is orchestration, loading class files and wiring them together, not
  * feature logic, which lives in the loaded classes.
  *
  * @package EMCP_Tools
@@ -27,16 +27,92 @@ class EMCP_Tools_Bootstrap {
 	 *
 	 * @since 2.1.0 (since 1.0.0 as emcp_tools_init)
 	 */
+	/**
+	 * Options read on every request but stored without autoload (schema
+	 * versions) or usually absent (module settings left at their defaults).
+	 * Priming them answers all of them with one query instead of one each.
+	 */
+	const PRIMED_OPTIONS = array(
+		'emcp_tools_search_index_db_version',
+		'emcp_tools_changelog_db_version',
+		'emcp_tools_oauth_db_version',
+		'emcp_tools_redirects_db_version',
+		'emcp_tools_static_db_version',
+		'emcp_tools_migrate_db_version',
+		'emcp_tools_static_deny_verified',
+		'emcp_tools_module_image_optimization_webp_serve',
+		'emcp_tools_module_image_optimization_max_dimension',
+		'emcp_tools_module_image_optimization_webp_quality',
+		'emcp_tools_module_gsap_contexts',
+		'emcp_tools_module_gsap_plugins',
+		'emcp_tools_hardening',
+	);
+
+	/**
+	 * Files only admin, REST, WP-CLI and cron requests use: the admin screens' REST
+	 * controllers and data classes. A visitor's page view never loads them; see
+	 * load_backend().
+	 */
+	private const BACKEND_FILES = array(
+		'includes/admin/rest/class-admin-rest-controller.php',
+		'includes/admin/class-admin-frame.php',
+		'includes/admin/rest/class-admin-rest-frame.php',
+		'includes/admin/data/class-admin-tools-data.php',
+		'includes/admin/rest/class-admin-rest-tools.php',
+		'includes/admin/data/class-admin-builders-data.php',
+		'includes/admin/rest/class-admin-rest-builders.php',
+		'includes/admin/data/class-admin-modules-data.php',
+		'includes/admin/rest/class-admin-rest-modules.php',
+		'includes/admin/data/class-admin-connection-data.php',
+		'includes/admin/rest/class-admin-rest-connection.php',
+		'includes/admin/data/class-admin-library-list.php',
+		'includes/admin/data/class-admin-prompts-data.php',
+		'includes/admin/rest/class-admin-rest-prompts.php',
+		'includes/admin/data/class-admin-marketplace-data.php',
+		'includes/admin/rest/class-admin-rest-marketplace.php',
+		'includes/admin/rest/class-admin-rest-palette.php',
+		'includes/admin/data/class-admin-context-data.php',
+		'includes/admin/rest/class-admin-rest-context.php',
+		'includes/admin/data/class-admin-history-data.php',
+		'includes/admin/data/class-admin-dashboard-data.php',
+		'includes/admin/rest/class-admin-rest-history.php',
+		'includes/admin/data/class-admin-redirects-data.php',
+		'includes/admin/rest/class-admin-rest-redirects.php',
+		'includes/admin/data/class-admin-static-site-data.php',
+		'includes/admin/rest/class-admin-rest-static-site.php',
+		'includes/admin/data/class-admin-log-data.php',
+		'includes/admin/rest/class-admin-rest-log.php',
+		'includes/admin/rest/class-admin-rest-dashboard.php',
+		'includes/admin/class-changelog-parser.php',
+		'includes/admin/data/class-admin-changelog-data.php',
+		'includes/admin/rest/class-admin-rest-changelog.php',
+		'includes/admin/data/class-admin-sandbox-list.php',
+		'includes/admin/data/class-admin-sandbox-data.php',
+		'includes/admin/data/class-admin-sandbox-cloud-data.php',
+		'includes/admin/rest/class-admin-rest-sandbox.php',
+		'includes/admin/data/class-admin-brand-kits-data.php',
+		'includes/admin/rest/class-admin-rest-brand-kits.php',
+	);
+
 	public static function boot(): void {
+		if ( function_exists( 'wp_prime_option_caches' ) ) {
+			wp_prime_option_caches( self::PRIMED_OPTIONS );
+		}
+
 		// Fallback legacy-data migration (the primary snapshot happens in the
 		// legacy guard while the old plugin is still present). Idempotent.
 		EMCP_Tools_Migration::migrate();
 
-		// Make the MCP Adapter available (active standalone plugin, else our
-		// bundled copy) BEFORE the dependency check, so the adapter is never a
-		// "go install this" blocker. The Abilities API is core in WP 6.9+/7.0.
+		// Boot the MCP Adapter: the official plugin when active, else EMCP's
+		// bundled fallback copy. The banner recommends the official plugin.
+		// Even with no adapter at all EMCP still loads; only the MCP server is
+		// missing.
 		require_once EMCP_TOOLS_DIR . 'includes/class-mcp-adapter-bootstrap.php';
 		EMCP_Tools_Adapter_Bootstrap::ensure();
+		if ( is_admin() ) {
+			require_once EMCP_TOOLS_DIR . 'includes/class-adapter-installer.php';
+			EMCP_Tools_Adapter_Installer::init();
+		}
 
 		if ( ! self::check_dependencies() ) {
 			return;
@@ -50,6 +126,13 @@ class EMCP_Tools_Bootstrap {
 		EMCP_Tools_Sandbox_Paths::maybe_migrate();
 
 		self::wire_hooks();
+
+		// Admin screens' REST controllers and the AI Chat engine: never on a visitor's
+		// page view. The rest_api_init hook covers a REST request the URI check missed.
+		if ( self::needs_mcp_surface() ) {
+			self::load_backend();
+		}
+		add_action( 'rest_api_init', array( __CLASS__, 'load_backend' ), 0 );
 
 		// The MCP tool surface (~80 ability classes + infra) is only used to
 		// register/run abilities: an MCP REST call, the admin Tools screen, WP-CLI,
@@ -91,7 +174,7 @@ class EMCP_Tools_Bootstrap {
 	 * Best-effort early detection of a REST request. `REST_REQUEST` is not defined
 	 * until `parse_request` (after plugins_loaded), so at boot time we fall back to
 	 * the request URI: the REST base (`/wp-json/`) or the plain-permalink
-	 * `?rest_route=` form. Deliberately broad — any REST request loads the full
+	 * `?rest_route=` form. Deliberately broad, any REST request loads the full
 	 * surface, so a custom MCP route is never missed.
 	 *
 	 * @since 3.12.2
@@ -105,7 +188,7 @@ class EMCP_Tools_Bootstrap {
 		if ( isset( $_GET['rest_route'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
 			return true;
 		}
-		$uri = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
+		$uri = isset( $_SERVER['REQUEST_URI'] ) && is_string( $_SERVER['REQUEST_URI'] ) ? esc_url_raw( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput
 		if ( '' === $uri ) {
 			return false;
 		}
@@ -135,11 +218,16 @@ class EMCP_Tools_Bootstrap {
 	 * @since 2.1.0
 	 */
 	private static function load_classes(): void {
+		require_once EMCP_TOOLS_DIR . 'includes/class-page-builders.php';
 		// Schema compatibility + the emcp_tools_register_ability() entry point
 		// must load before any ability group registers.
 		require_once EMCP_TOOLS_DIR . 'includes/class-schema-compat.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-id-generator.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-url-guard.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-frontend-page-fetcher.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-post-authorization.php';
+		EMCP_Tools_Post_Authorization::register();
+		require_once EMCP_TOOLS_DIR . 'includes/class-context-sections.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-site-context.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-elementor-data.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-element-factory.php';
@@ -147,8 +235,10 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/schemas/class-schema-generator.php';
 		require_once EMCP_TOOLS_DIR . 'includes/validators/class-element-validator.php';
 		require_once EMCP_TOOLS_DIR . 'includes/validators/class-settings-validator.php';
-		// Widget catalog — source of truth for the 5 catalog-backed widget tools.
+		require_once EMCP_TOOLS_DIR . 'includes/validators/class-widget-setting-keys.php';
+		// Widget catalog, source of truth for the 5 catalog-backed widget tools.
 		require_once EMCP_TOOLS_DIR . 'includes/class-secret.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-remote-keys.php';
 		require_once EMCP_TOOLS_DIR . 'includes/oauth/class-oauth-util.php';
 		require_once EMCP_TOOLS_DIR . 'includes/cloud/class-cloud.php';
 		require_once EMCP_TOOLS_DIR . 'includes/cloud/class-cloud-http.php';
@@ -156,6 +246,8 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/cloud/class-cloud-client.php';
 		require_once EMCP_TOOLS_DIR . 'includes/cloud/class-gateway-credential.php';
 		require_once EMCP_TOOLS_DIR . 'includes/cloud/class-cloud-sync.php';
+		require_once EMCP_TOOLS_DIR . 'includes/cloud/class-sandbox-cloud-state.php';
+		require_once EMCP_TOOLS_DIR . 'includes/cloud/class-marketplace-installs.php';
 		require_once EMCP_TOOLS_DIR . 'includes/cloud/class-settings-sync.php';
 		require_once EMCP_TOOLS_DIR . 'includes/oauth/class-oauth-store.php';
 		require_once EMCP_TOOLS_DIR . 'includes/oauth/class-oauth-metadata.php';
@@ -165,12 +257,46 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/oauth/class-oauth-bearer.php';
 		require_once EMCP_TOOLS_DIR . 'includes/oauth/class-oauth-server.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-change-log.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-lease.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-query-capture.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/redirection/class-redirection-api.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/redirection/class-redirection-writer.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/redirection/class-redirection-integration.php';
+		EMCP_Tools_Redirection_Writer::boot();
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/cptui/class-cptui-api.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/cptui/class-cptui-writer.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/cptui/class-cptui-integration.php';
+		EMCP_Tools_Cptui_Writer::boot();
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/wordfence/class-wordfence-api.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/wordfence/class-wordfence-integration.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/litespeed/class-litespeed-api.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/litespeed/class-litespeed-integration.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/wp-mail-smtp/class-wp-mail-smtp-api.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/wp-mail-smtp/class-wp-mail-smtp-integration.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/pods/class-pods-api.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/pods/class-pods-writer.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/pods/class-pods-integration.php';
+		EMCP_Tools_Pods_Writer::boot();
+		require_once EMCP_TOOLS_DIR . 'includes/class-management-policy.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-management-access.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-mcp-request-log.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-activity-stats.php';
+		require_once EMCP_TOOLS_DIR . 'includes/attention/interface-attention-check.php';
+		require_once EMCP_TOOLS_DIR . 'includes/attention/class-attention.php';
+		require_once EMCP_TOOLS_DIR . 'includes/attention/class-attention-checks.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-connection-setup.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-connection-first-call.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-request-context.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-mcp-log-recorder.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-change-blobs.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-change-recorder.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-structured-import.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-search-ranker.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-search-index.php';
 		require_once EMCP_TOOLS_DIR . 'includes/redirects/class-redirect-store.php';
 		require_once EMCP_TOOLS_DIR . 'includes/redirects/class-redirect-handler.php';
+		// Site hardening toggles (harden-site): read on every request, hooks only what is on.
+		require_once EMCP_TOOLS_DIR . 'includes/security/class-site-hardening.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-content-mirror.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-admin-bar.php';
 		if ( file_exists( EMCP_TOOLS_DIR . 'includes/class-github-updater.php' ) && ! defined( 'EMCP_WPORG_BUILD' ) ) {
@@ -181,21 +307,30 @@ class EMCP_Tools_Bootstrap {
 		// Editor-side auto-repair for AI-inserted static-save blocks (Kadence).
 		require_once EMCP_TOOLS_DIR . 'includes/class-block-repair.php';
 		add_action( 'init', array( 'EMCP_Tools_Nav_Menu_Shortcode', 'register' ) );
+		// Translations shipped in the plugin's own languages/ folder (the plugin is not
+		// on translate.wordpress.org, so just-in-time loading would never find them).
+		add_action(
+			'init',
+			static function () {
+				load_plugin_textdomain( 'emcp-tools', false, dirname( EMCP_TOOLS_BASENAME ) . '/languages' );
+			},
+			0
+		);
 		// ACF tools (field values + field group discovery/authoring; writes off by default).
 		// Meta Box tools (field values + field group discovery; writes off by default).
 
 		// Themes domain: the child-theme builder + the dispatcher base (must load
 		// before its subclasses) + the integrations.
-		// Forms-tab integrations — abstract base + CF7 (free). Pro form adapters
+		// Forms-tab integrations, abstract base + CF7 (free). Pro form adapters
 		// (WPForms/Gravity/Fluent/Ninja/Formidable) load via EMCP_Tools_Pro_Loader.
-		// SEO plugin integrations — abstract base + Slim SEO (free). The 6 Pro SEO
+		// SEO plugin integrations, abstract base + Slim SEO (free). The 6 Pro SEO
 		// adapters (Yoast/RankMath/AIOSEO/SeoPress/SEOFramework/SureRank) load via
 		// EMCP_Tools_Pro_Loader.
-		// Performance Analyzer (v3.0.0) — read-only server/WP/page audit.
+		// Performance Analyzer (v3.0.0), read-only server/WP/page audit.
 		// Filesystem tools (read/scan + write/edit/delete; writes off by default).
 		// Database tools (read-only query + structured writes; writes off by default).
 		// WP-CLI tools (run + background jobs; disabled-by-default, manage_options).
-		// Security & Malware Scanner (v3.0.0) — read-only multi-audit scan.
+		// Security & Malware Scanner (v3.0.0), read-only multi-audit scan.
 		// Brand Kits. The free writer + backup store + free-kit fetcher load
 		// unconditionally so the MCP REST/CLI/proxy surface can reach them. The
 		// Pro brand-kit admin + system-kit abilities live in the private Pro
@@ -214,19 +349,19 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/sandbox/class-sandbox-list-query.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-widget-store.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-widget-loader.php';
-		// Sandbox Bundle — portable cloud-ready format for blocks/widgets/snippets.
+		// Sandbox Bundle, portable cloud-ready format for blocks/widgets/snippets.
 		require_once EMCP_TOOLS_DIR . 'includes/sandbox/class-sandbox-bundle.php';
 		require_once EMCP_TOOLS_DIR . 'includes/sandbox/interface-sandbox-artifact.php';
 		require_once EMCP_TOOLS_DIR . 'includes/sandbox/class-sandbox-store.php';
-		// Bundle adapters — present the Widget Builder + PHP Snippet stores as the
+		// Bundle adapters, present the Widget Builder + PHP Snippet stores as the
 		// same cloud-ready artifact surface (EMCP_Tools_Sandbox_Artifact) as the
 		// block store, without touching either store's internals.
 		require_once EMCP_TOOLS_DIR . 'includes/sandbox/class-widget-bundle-adapter.php';
 		require_once EMCP_TOOLS_DIR . 'includes/sandbox/class-snippet-bundle-adapter.php';
-		// Sandbox Cloud abilities — export/import any sandbox artifact (block/
+		// Sandbox Cloud abilities, export/import any sandbox artifact (block/
 		// widget/snippet) as a portable bundle over the cloud contract. Free tree;
 		// registration is wired by the ability registrar (a later task).
-		// PHP Code Snippets (Sandbox) — free, capability-gated. AI can author +
+		// PHP Code Snippets (Sandbox), free, capability-gated. AI can author +
 		// validate drafts via MCP; only an admin can activate. The loader runs
 		// ACTIVE snippets (hash-verified, fatal-isolated).
 		require_once EMCP_TOOLS_DIR . 'includes/class-php-snippet-validator.php';
@@ -236,7 +371,7 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/class-atomic-props.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-atomic-styles.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-atomic-widget-map.php';
-		// Global Classes (Class Manager) reader — self-gates on Elementor 4.0+.
+		// Global Classes (Class Manager) reader, self-gates on Elementor 4.0+.
 		// Background library refresh.
 		require_once EMCP_TOOLS_DIR . 'includes/class-library-refresher.php';
 		// Modules framework (free) + built-in modules. The registry boots active
@@ -264,6 +399,11 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/themer/class-themer-resolver.php';
 		require_once EMCP_TOOLS_DIR . 'includes/themer/class-themer-condition-schema.php';
 		require_once EMCP_TOOLS_DIR . 'includes/themer/class-themer-cpt.php';
+		// Loop Items: per-item context, query builder, renderer (3.18.0).
+		require_once EMCP_TOOLS_DIR . 'includes/themer/loop/class-themer-loop-context.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/loop/class-themer-loop-query.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/loop/class-themer-loop-renderer.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/loop/class-themer-loop-config.php';
 		require_once EMCP_TOOLS_DIR . 'includes/themer/class-themer-content-renderer.php';
 		require_once EMCP_TOOLS_DIR . 'includes/themer/class-themer-theme-adapters.php';
 		require_once EMCP_TOOLS_DIR . 'includes/themer/class-themer-render-controller.php';
@@ -277,6 +417,14 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/themer/elements/class-themer-element-post-comments.php';
 		require_once EMCP_TOOLS_DIR . 'includes/themer/elements/class-themer-element-post-navigation.php';
 		require_once EMCP_TOOLS_DIR . 'includes/themer/elements/class-themer-element-author-box.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/elements/class-themer-element-loop-base.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/elements/class-themer-element-loop-grid.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/elements/class-themer-element-loop-carousel.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/loop/class-themer-loop-assets.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/loop/class-themer-loop-options.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/loop/class-themer-loop-widget-map.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/loop/class-themer-loop-block-map.php';
+		require_once EMCP_TOOLS_DIR . 'includes/themer/loop/class-themer-loop-rest.php';
 		require_once EMCP_TOOLS_DIR . 'includes/themer/dynamic/class-themer-dynamic-catalog.php';
 		require_once EMCP_TOOLS_DIR . 'includes/themer/class-themer-dynamic.php';
 		require_once EMCP_TOOLS_DIR . 'includes/themer/dynamic/class-themer-elementor-tags.php';
@@ -292,6 +440,10 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/themer/php/class-themer-php-admin.php';
 		require_once EMCP_TOOLS_DIR . 'includes/modules/class-themer-module.php';
 		require_once EMCP_TOOLS_DIR . 'includes/modules/class-redirect-module.php';
+		require_once EMCP_TOOLS_DIR . 'includes/modules/static-site/class-static-site-module.php';
+		foreach ( self::static_site_files() as $emcp_ss ) {
+			require_once EMCP_TOOLS_DIR . 'includes/static-site/class-static-site-' . $emcp_ss . '.php';
+		}
 		// Pro-tier units (SEO/a11y helpers + abilities, widget generator + builder
 		// abilities, system-kit abilities, Pro brand kits, AI Chat). These ship in
 		// the private Pro overlay (pro/) and are absent from the free build; the
@@ -301,6 +453,7 @@ class EMCP_Tools_Bootstrap {
 		// (loaded eagerly by Pro_Loader::load_runtime below) extend them, and their
 		// free subclasses in the deferred MCP surface do too. Bases must precede both.
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-theme-integration.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-block-pack-integration.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/forms/class-form-integration.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/seo/class-seo-integration.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-pro-loader.php';
@@ -323,7 +476,7 @@ class EMCP_Tools_Bootstrap {
 	 * Loads the MCP tool surface: every ability class plus its exclusive infra
 	 * (schema catalogs, guards, audits, integrations, stock clients). This is the
 	 * heaviest part of the plugin (~80 files) and is only needed to register or run
-	 * abilities — an MCP request, the admin Tools screen, WP-CLI, or cron. A plain
+	 * abilities, an MCP request, the admin Tools screen, WP-CLI, or cron. A plain
 	 * front-end page view never touches it, so deferring these requires off the
 	 * boot path keeps the per-request footprint low (memory, #128MB-hosts).
 	 *
@@ -364,6 +517,12 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-redirect-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-content-mirror-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-content-abilities.php';
+		// Taxonomy term tools and their History undo (admin History screen and
+		// rollback-change both run where the MCP surface is loaded).
+		require_once EMCP_TOOLS_DIR . 'includes/taxonomy/class-term-api.php';
+		require_once EMCP_TOOLS_DIR . 'includes/taxonomy/class-term-history.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-taxonomy-abilities.php';
+		EMCP_Tools_Term_History::boot();
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-dispatcher-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-settings-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-package-guard.php';
@@ -379,17 +538,21 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/blocks-catalog/class-spectra-catalog.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-spectra-integration.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-kadence-integration.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-generatepress-integration.php';
 		require_once EMCP_TOOLS_DIR . 'includes/blocks-catalog/class-kadence-blocks-catalog.php';
 		require_once EMCP_TOOLS_DIR . 'includes/blocks-catalog/class-kadence-pattern-library.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-kadence-blocks-integration.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/forms/class-cf7-integration.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/seo/class-slimseo-integration.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/seo/class-visibility-integration.php';
 		require_once EMCP_TOOLS_DIR . 'includes/performance/class-performance-finding.php';
 		require_once EMCP_TOOLS_DIR . 'includes/performance/class-performance-server-audit.php';
 		require_once EMCP_TOOLS_DIR . 'includes/performance/class-performance-page-audit.php';
 		require_once EMCP_TOOLS_DIR . 'includes/performance/class-performance-analyzer.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-performance-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/class-filesystem-guard.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-file-mover.php';
+		require_once EMCP_TOOLS_DIR . 'includes/class-file-quarantine.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-filesystem-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/sql/class-sql-lexer.php';
 		require_once EMCP_TOOLS_DIR . 'includes/sql/class-sql-policy.php';
@@ -404,8 +567,15 @@ class EMCP_Tools_Bootstrap {
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-integrity-audit.php';
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-hardening-audit.php';
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-software-audit.php';
+		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-compromise-audit.php';
 		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-scanner.php';
+		require_once EMCP_TOOLS_DIR . 'includes/security/class-hardening-status.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-security-abilities.php';
+		require_once EMCP_TOOLS_DIR . 'includes/security/class-access-log-parser.php';
+		require_once EMCP_TOOLS_DIR . 'includes/security/class-access-log-search.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-access-log-abilities.php';
+		require_once EMCP_TOOLS_DIR . 'includes/security/class-security-process-inspector.php';
+		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-process-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-svg-icon-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-custom-code-abilities.php';
 		require_once EMCP_TOOLS_DIR . 'includes/abilities/class-sandbox-cloud-abilities.php';
@@ -428,7 +598,75 @@ class EMCP_Tools_Bootstrap {
 		}
 	}
 
+	/**
+	 * The Static Site engine files this request needs, in load order: all of them for
+	 * the admin, REST, WP-CLI and cron requests that generate a site; on a visitor's
+	 * page view only what serves the generated pages, and nothing while the module
+	 * is off.
+	 *
+	 * @since 3.20.0
+	 *
+	 * @return string[] Names after class-static-site-.
+	 */
+	public static function static_site_files(): array {
+		if ( self::needs_mcp_surface() ) {
+			return array( 'paths', 'registry', 'files', 'extractor', 'rewriter', 'fetcher', 'db', 'store', 'locks', 'credits', 'discovery', 'packager', 'runner', 'server', 'deny-check' );
+		}
+		return EMCP_Tools_Static_Site_Module::is_enabled() ? array( 'paths', 'registry', 'files', 'db', 'store', 'server' ) : array();
+	}
+
+	/**
+	 * Loads and wires what only admin, REST, WP-CLI and cron requests use: the admin
+	 * screens' REST controllers and data classes, free and Pro, and the Pro AI Chat
+	 * engine. boot() runs it for those requests; a REST request the URI check missed
+	 * runs it on rest_api_init at priority 0, early enough for the routes the
+	 * controllers add at priority 10. Runs once.
+	 *
+	 * @since 3.20.0
+	 */
+	public static function load_backend(): void {
+		static $loaded = false;
+		if ( $loaded ) {
+			return;
+		}
+		$loaded = true;
+		foreach ( self::BACKEND_FILES as $rel ) {
+			require_once EMCP_TOOLS_DIR . $rel;
+		}
+		EMCP_Tools_Pro_Loader::load_backend();
+
+		// Admin frame REST (cookie-only): promo dismissal + notification read state.
+		( new EMCP_Tools_Admin_REST_Frame() )->register();
+		( new EMCP_Tools_Admin_REST_Tools() )->register();
+		( new EMCP_Tools_Admin_REST_Builders() )->register();
+		( new EMCP_Tools_Admin_REST_Modules() )->register();
+		( new EMCP_Tools_Admin_REST_Connection() )->register();
+		( new EMCP_Tools_Admin_REST_Prompts() )->register();
+		( new EMCP_Tools_Admin_REST_Brand_Kits() )->register();
+		( new EMCP_Tools_Admin_REST_Marketplace() )->register();
+		( new EMCP_Tools_Admin_REST_Palette() )->register();
+		( new EMCP_Tools_Admin_REST_Context() )->register();
+		( new EMCP_Tools_Admin_REST_History() )->register();
+		( new EMCP_Tools_Admin_REST_Log() )->register();
+		( new EMCP_Tools_Admin_REST_Dashboard() )->register();
+		( new EMCP_Tools_Admin_REST_Changelog() )->register();
+		if ( class_exists( 'EMCP_Tools_Redirect_Module' ) && EMCP_Tools_Redirect_Module::is_enabled() ) {
+			( new EMCP_Tools_Admin_REST_Redirects() )->register(); // The table exists only while the module is on.
+		}
+		if ( class_exists( 'EMCP_Tools_Static_Site_Module' ) && EMCP_Tools_Static_Site_Module::is_enabled() ) {
+			( new EMCP_Tools_Admin_REST_Static_Site() )->register();
+		}
+		( new EMCP_Tools_Admin_REST_Sandbox() )->register();
+
+		EMCP_Tools_Pro_Loader::wire_backend_hooks();
+	}
+
 	private static function wire_hooks(): void {
+		// Hardening toggles first, so a disabled XML-RPC request stops before other work.
+		// Does nothing when no toggle is on; never runs for WP-CLI or cron.
+		EMCP_Tools_Site_Hardening::init();
+		EMCP_Tools_Management_Access::init();
+		EMCP_Tools_Attention::init();
 		// structuredContent must be a JSON object; the adapter assigns a tool's
 		// return value to it verbatim, so a list result makes strict clients
 		// reject the response. Our own abilities are normalized at registration,
@@ -446,10 +684,18 @@ class EMCP_Tools_Bootstrap {
 		EMCP_Tools_Data::init();
 		// Content search index: install-on-init + incremental re-index on save/delete.
 		EMCP_Tools_Search_Index::init();
+		// Detected context summaries go stale when the theme or plugins change.
+		foreach ( array( 'switch_theme', 'activated_plugin', 'deactivated_plugin' ) as $emcp_hook ) {
+			add_action( $emcp_hook, array( 'EMCP_Tools_Context_Sections', 'flush' ) );
+		}
 		EMCP_Tools_Change_Blobs::init();
+		// Change ledger: the one-time cutover to the emcp_changes table (spec 9.1).
+		EMCP_Tools_Change_Cutover::init();
+		EMCP_Tools_Change_Notices::init();
+		EMCP_Tools_Change_Retention::init();
 		// The Redirect Manager (store table install + front-end 301/302 handler) is
 		// booted by EMCP_Tools_Redirect_Module::register() only when the module is
-		// active — a true kill switch from the Modules tab.
+		// active, a true kill switch from the Modules tab.
 		// OAuth sign-in: install storage on init (routes wired in later phases).
 		EMCP_Tools_OAuth_Server::init();
 		// Content mirror: auto-export-on-save (gated by its option) + delete cleanup.
@@ -468,7 +714,7 @@ class EMCP_Tools_Bootstrap {
 			add_action( 'init', array( 'EMCP_Tools_Block_Store', 'register_post_type' ) );
 			( new EMCP_Tools_Block_Loader() )->register_hooks();
 		}
-		// Background refresh of the Pro Prompts / Brand Kits libraries — registered
+		// Background refresh of the Pro Prompts / Brand Kits libraries, registered
 		// unconditionally (cron runs in a non-admin context) so an expired 24h
 		// cache self-heals without the user clicking "Sync Library".
 		EMCP_Tools_Library_Refresher::register();
@@ -476,11 +722,14 @@ class EMCP_Tools_Bootstrap {
 		// active ones on `init` (after registration, before most feature hooks).
 		$emcp_modules = EMCP_Tools_Modules_Registry::instance();
 		$emcp_modules->register( new EMCP_Tools_Image_Optimization_Module() );
+		EMCP_Tools_Image_Optimization_Module::watch_changes();
 		$emcp_modules->register( new EMCP_Tools_Prompts_Module() );
 		$emcp_modules->register( new EMCP_Tools_Brand_Kits_Module() );
 		$emcp_modules->register( new EMCP_Tools_Templates_Module() );
 		$emcp_modules->register( new EMCP_Tools_Themer_Module() );
 		$emcp_modules->register( new EMCP_Tools_Redirect_Module() );
+		$emcp_modules->register( new EMCP_Tools_Static_Site_Module() );
+		EMCP_Tools_Static_Site_Module::watch_activation();
 		$emcp_modules->register( new EMCP_Tools_Agent_Skills_Module() );
 		$emcp_modules->register( new EMCP_Tools_SVG_Support_Module() );
 		$emcp_modules->register( new EMCP_Tools_Cloud_Module() );
@@ -507,9 +756,20 @@ class EMCP_Tools_Bootstrap {
 	 *
 	 * @since 2.1.0
 	 */
-	private static function load_admin(): void {
-		require_once EMCP_TOOLS_DIR . 'includes/admin/class-admin-pager.php';
+	/**
+	 * Load the admin classes without wiring any admin hooks. The admin REST
+	 * endpoints need them, and REST requests are not is_admin().
+	 */
+	public static function require_admin_classes(): void {
+		require_once EMCP_TOOLS_DIR . 'includes/admin/class-admin-icons.php';
+		require_once EMCP_TOOLS_DIR . 'includes/admin/class-admin-nav.php';
+		require_once EMCP_TOOLS_DIR . 'includes/admin/class-admin-screens.php';
+		require_once EMCP_TOOLS_DIR . 'includes/admin/class-admin-locked.php';
 		require_once EMCP_TOOLS_DIR . 'includes/admin/class-admin.php';
+	}
+
+	private static function load_admin(): void {
+		self::require_admin_classes();
 		require_once EMCP_TOOLS_DIR . 'includes/admin/class-mcpb-builder.php';
 
 		// Pro admin units (AI Chat page assets + Pro prompts/templates/skills +
@@ -519,19 +779,9 @@ class EMCP_Tools_Bootstrap {
 		EMCP_Tools_Pro_Loader::load_admin();
 		EMCP_Tools_Pro_Loader::wire_admin_hooks();
 
-		// Non-blocking, per-user-dismissible nudge to install Elementor when it is
-		// absent (Elementor is optional; every other tool works without it).
-		require_once EMCP_TOOLS_DIR . 'includes/admin/class-elementor-notice.php';
-		( new EMCP_Tools_Elementor_Notice() )->init();
-
 		require_once EMCP_TOOLS_DIR . 'includes/admin/class-upgrade-notice.php';
 		( new EMCP_Tools_Upgrade_Notice() )->init();
 
-		// Facebook community banner — only renders once the upgrade banner is out
-		// of the way (Pro users, or free users who dismissed it), so we never
-		// stack two banners on the dashboard.
-		require_once EMCP_TOOLS_DIR . 'includes/admin/class-community-notice.php';
-		( new EMCP_Tools_Community_Notice() )->init();
 	}
 
 	/**
@@ -545,7 +795,7 @@ class EMCP_Tools_Bootstrap {
 	private static function check_dependencies(): bool {
 		// PHP 8.1+ is required. Elementor 4.0+ uses 8.1+ features that silently
 		// fail on older PHP (writes no-op, _elementor_data never persists).
-		// WordPress only enforces Requires PHP at activation, not on every load —
+		// WordPress only enforces Requires PHP at activation, not on every load,
 		// so we re-check here to surface a clear admin notice if the host
 		// downgraded PHP after the plugin was already installed.
 		if ( version_compare( PHP_VERSION, '8.1', '<' ) ) {
@@ -576,12 +826,8 @@ class EMCP_Tools_Bootstrap {
 			$missing[] = 'WordPress Abilities API (requires WordPress 6.9+)';
 		}
 
-		// MCP Adapter: bundled with the plugin (EMCP_Tools_Adapter_Bootstrap::ensure()
-		// ran above). Only fails if the bundled source is missing/corrupt — a
-		// broken build, not a user action.
-		if ( ! class_exists( '\WP\MCP\Core\McpAdapter' ) ) {
-			$missing[] = 'WordPress MCP Adapter (bundled, reinstall the plugin if this persists)';
-		}
+		// The MCP Adapter is not a requirement here: EMCP bundles a fallback copy,
+		// and without any copy EMCP still loads and offers to install it.
 
 		if ( ! empty( $missing ) ) {
 			add_action(
@@ -604,9 +850,8 @@ class EMCP_Tools_Bootstrap {
 
 		// Elementor is OPTIONAL. When absent, the plugin still loads and every
 		// beyond-Elementor tool works; only the Elementor tool family + the
-		// Elementor admin areas are unavailable. The non-blocking, per-user
-		// dismissible "Install Elementor" nudge is handled by
-		// EMCP_Tools_Elementor_Notice, wired in load_admin().
+		// Elementor admin areas are unavailable. Builder availability is shown
+		// on the Page Builders screen instead of an installation notice.
 
 		return true;
 	}

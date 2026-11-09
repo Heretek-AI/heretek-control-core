@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy-paste MCP configurations for connecting to the MCP Tools for Elementor server. Pick the one that matches your client and environment.",
+  "_comment": "Copy-paste MCP configurations for connecting to the MCP Tools for WordPress & Page Builders server. Pick the one that matches your client and environment.",
 
   "claude_desktop_local_wpcli": {
     "_description": "Claude Desktop — local WordPress via WP-CLI (fastest, recommended for local dev)",

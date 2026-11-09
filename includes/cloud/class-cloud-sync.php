@@ -91,16 +91,22 @@ class EMCP_Tools_Cloud_Sync {
 	 * the cloud in one call — the bulk counterpart to backup(). Reuses the
 	 * per-artifact backup() so each push keeps its checksum/validation.
 	 *
+	 * Artifacts whose content has not changed since their last push are skipped
+	 * (the cloud PUT is an upsert keyed by uuid, so re-pushing was harmless but
+	 * re-uploaded the whole library on every click); pass $force to push them
+	 * anyway.
+	 *
 	 * @param string[] $kinds Kinds to sync (block/widget/snippet); empty = all.
-	 * @return array|\WP_Error { pushed, failed, items:[{kind,id,ok,error?}] }.
+	 * @param bool     $force Push even artifacts that are already up to date.
+	 * @return array|\WP_Error { pushed, skipped, failed, items:[{kind,id,ok,skipped?,error?}] }.
 	 */
-	public static function bulk_backup( array $kinds = array() ) {
+	public static function bulk_backup( array $kinds = array(), bool $force = false ) {
 		if ( ! EMCP_Tools_Cloud::is_connected() ) {
 			return self::not_connected();
 		}
 		$map     = self::kind_post_types();
 		$kinds   = empty( $kinds ) ? array_keys( $map ) : array_values( array_intersect( $kinds, array_keys( $map ) ) );
-		$results = array( 'pushed' => 0, 'failed' => 0, 'items' => array() );
+		$results = array( 'pushed' => 0, 'skipped' => 0, 'failed' => 0, 'items' => array() );
 
 		foreach ( $kinds as $kind ) {
 			// Skip a kind whose store isn't available (e.g. block on a free build).
@@ -117,6 +123,11 @@ class EMCP_Tools_Cloud_Sync {
 				)
 			);
 			foreach ( (array) $ids as $id ) {
+				if ( ! $force && self::is_up_to_date( $kind, (int) $id ) ) {
+					$results['skipped']++;
+					$results['items'][] = array( 'kind' => $kind, 'id' => (int) $id, 'ok' => true, 'skipped' => true );
+					continue;
+				}
 				$res = self::backup( $kind, (int) $id );
 				if ( is_wp_error( $res ) ) {
 					$results['failed']++;
@@ -128,6 +139,33 @@ class EMCP_Tools_Cloud_Sync {
 			}
 		}
 		return $results;
+	}
+
+	/**
+	 * Whether a local artifact's content is unchanged since its last cloud push:
+	 * it was pushed before AND the checksum recorded at that push equals the
+	 * current one. A missing baseline (pushed before checksum tracking existed)
+	 * counts as changed, since the content cannot be proven unchanged; the next
+	 * push records a fresh baseline.
+	 *
+	 * @param string $kind Artifact kind.
+	 * @param int    $id   Local artifact id.
+	 * @return bool
+	 */
+	public static function is_up_to_date( string $kind, int $id ): bool {
+		if ( ! get_post_meta( $id, '_emcp_cloud_pushed', true ) ) {
+			return false;
+		}
+		$recorded = (string) get_post_meta( $id, '_emcp_cloud_checksum', true );
+		if ( '' === $recorded ) {
+			return false;
+		}
+		$art = self::abilities()->resolve_artifact( $kind );
+		if ( ! $art ) {
+			return false;
+		}
+		$current = (string) $art->checksum( $id );
+		return '' !== $current && hash_equals( $recorded, $current );
 	}
 
 	/**
@@ -160,6 +198,9 @@ class EMCP_Tools_Cloud_Sync {
 	/**
 	 * Push a config blob (settings/brand_kit/tool_toggles) to the cloud.
 	 *
+	 * Settings are account-scoped so another connected site can pull them. Other
+	 * config types retain their existing site-scoped behavior.
+	 *
 	 * @param string $type Config type.
 	 * @param array  $data Config data.
 	 * @return array|\WP_Error
@@ -168,9 +209,11 @@ class EMCP_Tools_Cloud_Sync {
 		if ( ! EMCP_Tools_Cloud::is_connected() ) {
 			return self::not_connected();
 		}
+		$scope     = ( 'settings' === $type ) ? 'account' : 'site';
+		$site_uuid = ( 'account' === $scope ) ? '' : EMCP_Tools_Cloud::site_uuid();
 		return EMCP_Tools_Cloud_Client::put(
 			'/api/cloud/v1/config/' . rawurlencode( $type ),
-			array( 'scope' => 'site', 'site_uuid' => EMCP_Tools_Cloud::site_uuid(), 'data' => (string) wp_json_encode( $data ) )
+			array( 'scope' => $scope, 'site_uuid' => $site_uuid, 'data' => (string) wp_json_encode( $data ) )
 		);
 	}
 
@@ -181,8 +224,12 @@ class EMCP_Tools_Cloud_Sync {
 	 * @return array|\WP_Error
 	 */
 	public static function pull_config( string $type ) {
+		$scope     = ( 'settings' === $type ) ? 'account' : 'site';
+		$site_uuid = ( 'account' === $scope ) ? '' : EMCP_Tools_Cloud::site_uuid();
 		return EMCP_Tools_Cloud_Client::get(
-			'/api/cloud/v1/config/' . rawurlencode( $type ) . '?site_uuid=' . rawurlencode( EMCP_Tools_Cloud::site_uuid() )
+			'/api/cloud/v1/config/' . rawurlencode( $type )
+			. '?scope=' . rawurlencode( $scope )
+			. '&site_uuid=' . rawurlencode( $site_uuid )
 		);
 	}
 
@@ -204,7 +251,7 @@ class EMCP_Tools_Cloud_Sync {
 			$args = ( '' !== $args ) ? array( 'category' => $args ) : array();
 		}
 		$query = array();
-		foreach ( array( 'q', 'kind', 'category', 'access', 'sort', 'page', 'per_page' ) as $key ) {
+		foreach ( array( 'q', 'kind', 'category', 'access', 'sort', 'page', 'per_page', 'view' ) as $key ) {
 			if ( isset( $args[ $key ] ) && '' !== (string) $args[ $key ] ) {
 				$query[ $key ] = $args[ $key ];
 			}
@@ -284,7 +331,20 @@ class EMCP_Tools_Cloud_Sync {
 			return new \WP_Error( 'unknown_kind', __( 'Unknown artifact kind.', 'emcp-tools' ) );
 		}
 		$new_id = $art->apply_bundle( $bundle );
-		return is_wp_error( $new_id ) ? $new_id : array( 'id' => (int) $new_id );
+		if ( is_wp_error( $new_id ) ) {
+			return $new_id;
+		}
+		// Remembered locally so the Marketplace screen can say "Installed",
+		// whether the install came from the screen or the MCP tool.
+		if ( class_exists( 'EMCP_Tools_Marketplace_Installs' ) ) {
+			EMCP_Tools_Marketplace_Installs::record(
+				$slug,
+				(string) ( $res['kind'] ?? $bundle['kind'] ?? '' ),
+				(int) $new_id,
+				(string) ( $bundle['meta']['title'] ?? $slug )
+			);
+		}
+		return array( 'id' => (int) $new_id );
 	}
 
 	/**

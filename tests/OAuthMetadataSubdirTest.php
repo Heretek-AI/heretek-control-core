@@ -66,11 +66,32 @@ class OAuthMetadataSubdirTest extends \PHPUnit\Framework\TestCase {
 		);
 	}
 
-	/** path_matches: exact + resource-scoped true, sibling false. */
+	/**
+	 * path_matches: exact + OUR resource-scoped path true; a sibling well-known
+	 * path and another server's resource suffix false. A second OAuth-capable
+	 * MCP plugin with a path-based issuer has its clients request
+	 * `/.well-known/oauth-authorization-server/<its issuer path>`; answering
+	 * that with EMCP's document fails the client's issuer check before consent.
+	 */
 	public function test_path_matches_semantics() {
-		$this->assertTrue( EMCP_Tools_OAuth_Metadata::path_matches( '/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource' ) );
-		$this->assertTrue( EMCP_Tools_OAuth_Metadata::path_matches( '/.well-known/oauth-protected-resource/wp-json/mcp/x', '/.well-known/oauth-protected-resource' ) );
-		$this->assertFalse( EMCP_Tools_OAuth_Metadata::path_matches( '/.well-known/oauth-protected-resource-other', '/.well-known/oauth-protected-resource' ) );
+		$base = '/.well-known/oauth-protected-resource';
+		$this->assertTrue( EMCP_Tools_OAuth_Metadata::path_matches( $base, $base ) );
+		$this->assertTrue( EMCP_Tools_OAuth_Metadata::path_matches( $base . '/wp-json/mcp/emcp-tools-server', $base ) );
+		$this->assertTrue( EMCP_Tools_OAuth_Metadata::path_matches( $base . '/wp-json/mcp/emcp-tools-server/', $base ), 'trailing slash tolerated' );
+		$this->assertFalse( EMCP_Tools_OAuth_Metadata::path_matches( $base . '-other', $base ) );
+		$this->assertFalse( EMCP_Tools_OAuth_Metadata::path_matches( $base . '/wp-json/mcp/x', $base ), 'another server resource is not ours' );
+		$this->assertFalse( EMCP_Tools_OAuth_Metadata::path_matches( '/.well-known/oauth-authorization-server/wp-json/tropk-mcp/v1/', '/.well-known/oauth-authorization-server' ), 'a path-based issuer of another plugin must fall through' );
+	}
+
+	/** Subdirectory install: the resource-scoped path carries the subdir twice (once stripped as home path) and must still be ours. */
+	public function test_path_matches_own_resource_on_a_subdirectory_install() {
+		$GLOBALS['emcp_test']['home_url'] = 'https://demo.emcptools.com/gpt-build';
+		$base = '/.well-known/oauth-protected-resource';
+		$this->assertContains( '/gpt-build/wp-json/mcp/emcp-tools-server', EMCP_Tools_OAuth_Metadata::own_resource_paths() );
+		$this->assertContains( '/wp-json/mcp/emcp-tools-server', EMCP_Tools_OAuth_Metadata::own_resource_paths() );
+		$stripped = EMCP_Tools_OAuth_Metadata::normalize_request_path( '/gpt-build' . $base . '/gpt-build/wp-json/mcp/emcp-tools-server' );
+		$this->assertTrue( EMCP_Tools_OAuth_Metadata::path_matches( $stripped, $base ) );
+		$this->assertFalse( EMCP_Tools_OAuth_Metadata::path_matches( $base . '/gpt-build/wp-json/tropk-mcp/v1', $base ) );
 	}
 
 	/** Resource comparison normalizes only URI components that are insensitive. */

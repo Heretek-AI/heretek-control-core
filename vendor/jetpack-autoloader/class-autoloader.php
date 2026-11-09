@@ -5,7 +5,7 @@
  * @package automattic/jetpack-autoloader
  */
 
-namespace Automattic\Jetpack\Autoloader\jp739f4acc86163bbfff322c2caa780af0\al5_0_20;
+namespace Automattic\Jetpack\Autoloader\jp2d554f6e20021cda7c1119f725a7c502\al6_0_2;
 
  // phpcs:ignore
 
@@ -60,12 +60,12 @@ class Autoloader {
 		// We combine the active list and cached list to preemptively load classes for plugins that are
 		// presently unknown but will be loaded during the request. While this may result in us considering packages in
 		// deactivated plugins there shouldn't be any problems as a result and the eventual consistency is sufficient.
-		$all_plugins = array_merge( $active_plugins, $cached_plugins );
-
-		// In particular we also include the current plugin to address the case where it is the latest autoloader
-		// but also unknown (and not cached). We don't want it in the active list because we don't know that it
-		// is active but we need it in the all plugins list so that it is considered by the autoloader.
-		$all_plugins[] = $current_plugin;
+		// The current plugin is included to cover the case where it is the latest autoloader but unknown (and not
+		// cached). It goes ahead of the cached entries because manifests are read in order and ties go to the first
+		// read: a cached path can name a build a host just retired, which must not outrank the directory we are
+		// executing from. Do not move it ahead of the active entries, which would give each plugin a differently
+		// ordered list and trip the order-sensitive comparison in have_plugins_changed().
+		$all_plugins = array_merge( $active_plugins, array( $current_plugin ), $cached_plugins );
 
 		// We require uniqueness in the array to avoid processing the same plugin more than once.
 		$all_plugins = array_values( array_unique( $all_plugins ) );

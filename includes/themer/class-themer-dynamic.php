@@ -4,7 +4,7 @@
  *
  * Every dynamic element (post title, archive title, breadcrumbs, meta, site logo,
  * menu, description, content, archive loop) resolves against the CURRENT main
- * query — Themer renders body templates with the main query intact, so these
+ * query, Themer renders body templates with the main query intact, so these
  * output the viewed post/archive, not the template. Both builders call the same
  * static methods so the dynamic logic lives in exactly one place. Every method
  * returns an escaped HTML string.
@@ -57,6 +57,14 @@ class EMCP_Tools_Themer_Dynamic {
 	}
 
 	private static function queried_id(): int {
+		// Inside a Loop Grid / Carousel, the card's post wins over the queried
+		// object, which is the page or archive around the grid.
+		if ( class_exists( 'EMCP_Tools_Themer_Loop_Context' ) ) {
+			$loop_post = EMCP_Tools_Themer_Loop_Context::current_post_id();
+			if ( $loop_post > 0 ) {
+				return $loop_post;
+			}
+		}
 		$obj = get_queried_object();
 		if ( $obj instanceof WP_Post ) {
 			return (int) $obj->ID;
@@ -74,18 +82,27 @@ class EMCP_Tools_Themer_Dynamic {
 	 *
 	 * There is no queried post inside the Themer editor, so without this every
 	 * dynamic field renders blank. The sample is chosen at render time and is
-	 * never persisted into the template.
+	 * never persisted into the template. Most free template types sample the
+	 * latest published post; a Loop Item instead samples its own configured
+	 * preview post (see the loop-preview branch below).
 	 *
 	 * @since 3.13.0
-	 * @param string $template_type Themer template type, when known. Accepted so a
-	 *                              later task can sample a matching CPT; every free
-	 *                              template type samples a post.
 	 * @return int Post id, or 0 outside preview.
 	 */
-	public static function preview_post_id( string $template_type = '' ): int {
-		unset( $template_type );
+	public static function preview_post_id(): int {
 		if ( ! self::is_preview_context() ) {
 			return 0;
+		}
+		// A Loop Item carries its own sample post (Gutenberg's editor renders
+		// previews over REST, where nothing is queried and no loop is running).
+		if ( class_exists( 'EMCP_Tools_Themer_CPT' ) ) {
+			$tpl_id = EMCP_Tools_Themer_CPT::current_template_id();
+			if ( $tpl_id > 0 && 'loop' === EMCP_Tools_Themer_CPT::template_type( $tpl_id ) ) {
+				$sample = EMCP_Tools_Themer_CPT::loop_preview_post_id( $tpl_id );
+				if ( $sample > 0 ) {
+					return $sample;
+				}
+			}
 		}
 		$ids = get_posts(
 			array(
@@ -122,14 +139,14 @@ class EMCP_Tools_Themer_Dynamic {
 	/**
 	 * Archive title (category / tag / taxonomy / author / date / post-type archive).
 	 *
-	 * @param array $args tag, show_prefix (bool — keep the "Category:" prefix).
+	 * @param array $args tag, show_prefix (bool, keep the "Category:" prefix).
 	 * @return string
 	 */
 	public static function archive_title( array $args = array() ): string {
 		$tag = self::tag( (string) ( $args['tag'] ?? 'h1' ), 'h1' );
 		if ( empty( $args['show_prefix'] ) ) {
 			// WP 5.5+ exposes the "Category:" / "Tag:" / "Author:" prefix as a
-			// filterable string — the robust way to drop it.
+			// filterable string, the robust way to drop it.
 			add_filter( 'get_the_archive_title_prefix', '__return_empty_string' );
 			$title = get_the_archive_title();
 			remove_filter( 'get_the_archive_title_prefix', '__return_empty_string' );
@@ -266,7 +283,7 @@ class EMCP_Tools_Themer_Dynamic {
 					break;
 				case 'comments':
 					$count = (int) get_comments_number( $id );
-					$out[] = '<li class="emcp-dyn-meta-comments"><a href="' . esc_url( (string) get_comments_link( $id ) ) . '">' . esc_html( sprintf( _n( '%s comment', '%s comments', $count, 'emcp-tools' ), number_format_i18n( $count ) ) ) . '</a></li>';
+					$out[] = '<li class="emcp-dyn-meta-comments"><a href="' . esc_url( (string) get_comments_link( $id ) ) . '">' . esc_html( sprintf( /* translators: %s: number of comments. */ _n( '%s comment', '%s comments', $count, 'emcp-tools' ), number_format_i18n( $count ) ) ) . '</a></li>';
 					break;
 			}
 		}
@@ -345,11 +362,11 @@ class EMCP_Tools_Themer_Dynamic {
 			}
 		}
 		$out = wp_nav_menu( $menu_args );
-		return is_string( $out ) ? $out : '';
+		return is_string( $out ) ? wp_kses_post( $out ) : '';
 	}
 
 	/**
-	 * Description — the archive description on archives, the post excerpt on
+	 * Description, the archive description on archives, the post excerpt on
 	 * singular views.
 	 *
 	 * @param array $args length (words, 0 = default).
@@ -387,6 +404,45 @@ class EMCP_Tools_Themer_Dynamic {
 		if ( ! $id ) {
 			return '';
 		}
+		// A password-protected post shows WordPress's password form until it is unlocked, as the_content() does.
+		if ( function_exists( 'post_password_required' ) && post_password_required( $id ) ) {
+			return '<div class="emcp-dyn emcp-dyn-post-content entry-content">' . get_the_password_form( $id ) . '</div>';
+		}
+		// A post whose own content holds the Post Content block would render itself
+		// again and again; render each post once per nesting (other posts, such as
+		// loop cards, still render).
+		static $rendering = array();
+		if ( isset( $rendering[ $id ] ) ) {
+			return '';
+		}
+		$rendering[ $id ] = true;
+		try {
+			return self::render_post_content( (int) $id );
+		} finally {
+			unset( $rendering[ $id ] );
+		}
+	}
+
+	/**
+	 * Render a post's content for post_content(), which guards against re-entry.
+	 *
+	 * @param int $id Post ID.
+	 * @return string
+	 */
+	private static function render_post_content( int $id ): string {
+		// Bricks stores the queried page in postmeta, leaving post_content empty.
+		// Render it natively when a Themer body contains the Post Content block.
+		if ( 'bricks' === get_template() && 'bricks' === get_post_meta( $id, '_bricks_editor_mode', true )
+			&& class_exists( '\\Bricks\\Frontend' ) && class_exists( '\\Bricks\\Database' ) && class_exists( '\\Bricks\\Helpers' ) ) {
+			if ( ! \Bricks\Helpers::render_with_bricks( $id ) ) { return ''; }
+			static $rendering_bricks = false;
+			if ( $rendering_bricks ) { return ''; }
+			$rendering_bricks = true;
+			try {
+				$content = \Bricks\Frontend::render_data( \Bricks\Database::get_data( $id, 'content' ), 'content' );
+				return '<div class="emcp-dyn emcp-dyn-post-content entry-content">' . $content . '</div>';
+			} finally { $rendering_bricks = false; }
+		}
 		$content = get_post_field( 'post_content', $id );
 		$content = apply_filters( 'the_content', (string) $content );
 		$content = str_replace( ']]>', ']]&gt;', $content );
@@ -413,7 +469,7 @@ class EMCP_Tools_Themer_Dynamic {
 	 *
 	 * On a real front-end archive it loops the MAIN query (that archive's posts).
 	 * In the editor / a block or Elementor preview (or any non-archive context)
-	 * there is no archive query, so it shows a SAMPLE of recent posts instead —
+	 * there is no archive query, so it shows a SAMPLE of recent posts instead:
 	 * otherwise the widget would just say "No posts found." while you design it.
 	 *
 	 * @param array $args layout (grid|list), columns, show_image, show_title,
@@ -443,7 +499,7 @@ class EMCP_Tools_Themer_Dynamic {
 			$own      = false;
 			$paginate = ! empty( $args['pagination'] );
 		} else {
-			// Sample query for the editor/preview — honor optional query args so the
+			// Sample query for the editor/preview, honor optional query args so the
 			// preview can reflect a specific CPT / ordering / taxonomy term instead
 			// of always showing recent posts.
 			$sample = array(
@@ -662,7 +718,7 @@ class EMCP_Tools_Themer_Dynamic {
 				break;
 			case 'featured-image':
 				$id  = self::queried_id();
-				$out = self::image_value( $id ? (int) get_post_thumbnail_id( $id ) : 0 );
+				$out = self::image_value( $id ? (int) get_post_thumbnail_id( $id ) : 0, self::image_size( $args ) );
 				break;
 			default:
 				/**
@@ -705,19 +761,38 @@ class EMCP_Tools_Themer_Dynamic {
 	/**
 	 * Normalize an attachment id into the image value shape.
 	 *
-	 * @param int $id Attachment id.
+	 * @param int    $id   Attachment id.
+	 * @param string $size Registered image size.
 	 * @return array{id:int,url:string,alt:string}
 	 */
-	private static function image_value( int $id ): array {
+	private static function image_value( int $id, string $size = 'full' ): array {
 		if ( $id <= 0 ) {
 			return array( 'id' => 0, 'url' => '', 'alt' => '' );
 		}
-		$src = wp_get_attachment_image_src( $id, 'full' );
+		$src = wp_get_attachment_image_src( $id, '' !== $size ? $size : 'full' );
 		return array(
 			'id'  => $id,
 			'url' => is_array( $src ) && isset( $src[0] ) ? (string) $src[0] : '',
 			'alt' => (string) get_post_meta( $id, '_wp_attachment_image_alt', true ),
 		);
+	}
+
+	/**
+	 * The image size a caller asked for, when it is a registered size; 'full'
+	 * otherwise. Matched exactly, not through sanitize_key(), because sizes
+	 * registered with capitals (`Hero-Wide`) are valid and would be lowered
+	 * into a name that does not exist.
+	 *
+	 * @param array $args Source args.
+	 * @return string
+	 */
+	private static function image_size( array $args ): string {
+		$size = isset( $args['size'] ) && is_string( $args['size'] ) ? trim( $args['size'] ) : '';
+		if ( '' === $size || 'full' === $size ) {
+			return 'full';
+		}
+		$known = function_exists( 'get_intermediate_image_sizes' ) ? (array) get_intermediate_image_sizes() : array();
+		return in_array( $size, $known, true ) ? $size : 'full';
 	}
 
 	public static function catalog(): array {
@@ -731,7 +806,7 @@ class EMCP_Tools_Themer_Dynamic {
 
 	/**
 	 * Translate a builder's attributes/settings into provider args. Shared by the
-	 * Gutenberg blocks and the Elementor widgets — both use the same attribute
+	 * Gutenberg blocks and the Elementor widgets, both use the same attribute
 	 * keys (`tag`, `link`, `showPrefix`, `showDate`, …). Truthy values from either
 	 * builder (block `true`/`false` or Elementor `'yes'`/`''`) normalize correctly.
 	 *
@@ -775,6 +850,9 @@ class EMCP_Tools_Themer_Dynamic {
 					'more_text'    => (string) ( $a['moreText'] ?? '' ),
 					'pagination'   => ! empty( $a['pagination'] ),
 				);
+			case 'loop-grid':
+			case 'loop-carousel':
+				return EMCP_Tools_Themer_Loop_Block_Map::attributes_to_args( $key, $a );
 		}
 		return array();
 	}
@@ -826,6 +904,10 @@ class EMCP_Tools_Themer_Dynamic {
 				return EMCP_Tools_Themer_Element_Post_Navigation::render( $args );
 			case 'author-box':
 				return EMCP_Tools_Themer_Element_Author_Box::render( $args );
+			case 'loop-grid':
+				return EMCP_Tools_Themer_Element_Loop_Grid::render( $args );
+			case 'loop-carousel':
+				return EMCP_Tools_Themer_Element_Loop_Carousel::render( $args );
 		}
 		return '';
 	}

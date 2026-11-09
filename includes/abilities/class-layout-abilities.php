@@ -123,7 +123,7 @@ class EMCP_Tools_Layout_Abilities {
 			'emcp-tools/add-container',
 			array(
 				'label'               => __( 'Add Container', 'emcp-tools' ),
-				'description'         => __( 'Adds a container to a page. Supports both flex (default) and grid layouts via container_type. Omit parent_id for top-level, or provide a parent container ID for nesting. Flex tips: Use flex_direction=row for side-by-side children, flex_wrap=wrap for wrapping, flex_justify_content for main-axis alignment (e.g. space-between, center), flex_align_items for cross-axis alignment. (The shorthand justify_content / align_items are also accepted and remapped to flex_justify_content / flex_align_items.) Grid tips: Set container_type=grid with grid_columns_grid, grid_rows_grid, grid_gaps. Background: set background_background=classic and background_color=#hex. Border: set border_border=solid, border_width, border_color. Also supports min_height, overflow, html_tag, padding, margin, position, z_index, animation.', 'emcp-tools' ),
+				'description'         => __( 'Adds a container to a page. Supports both flex (default) and grid layouts via settings.container_type. Omit parent_id for top-level, or provide a parent container ID for nesting. Flex tips: Use flex_direction=row for side-by-side children, flex_wrap=wrap for wrapping, flex_justify_content for main-axis alignment, flex_align_items for cross-axis alignment. The shorthand justify_content / align_items are also accepted. Grid tips: Set container_type=grid with grid_columns_grid, grid_rows_grid, grid_gaps inside settings. Elementor defaults to 2 rows; for a single row explicitly set grid_rows_grid: {"unit":"fr","size":1}. Background: set background_background=classic and background_color=#hex. Border: set border_border=solid, border_width, border_color. Supply all four sides for margin/padding/border dimensions: one blank side may suppress the entire CSS rule. Partial dimensions are saved unchanged with warnings. Also supports min_height, overflow, html_tag, position, z_index, animation.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_add_container' ),
 				'permission_callback' => array( $this, 'check_edit_permission' ),
@@ -158,6 +158,7 @@ class EMCP_Tools_Layout_Abilities {
 					'properties' => array(
 						'element_id' => array( 'type' => 'string' ),
 						'post_id'    => array( 'type' => 'integer' ),
+						'warnings'   => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 				'meta'                => array(
@@ -218,6 +219,17 @@ class EMCP_Tools_Layout_Abilities {
 			return $page_data;
 		}
 
+		// Partial classic dimensions are left out of a new element (#151).
+		// With full_bleed, a partial side sent over the preset is filled from it.
+		$guard    = EMCP_Tools_Element_Factory::guard_settings(
+			(array) $settings,
+			null,
+			array( 'elType' => 'container' ),
+			empty( $input['full_bleed'] ) ? null : self::full_bleed_preset(),
+			'full_bleed preset'
+		);
+		$settings = $guard['settings'];
+
 		// When nesting inside a parent, mark as inner container.
 		$container = $this->factory->create_container( $settings );
 		if ( ! empty( $parent_id ) ) {
@@ -246,6 +258,7 @@ class EMCP_Tools_Layout_Abilities {
 		return array(
 			'element_id' => $container['id'],
 			'post_id'    => $post_id,
+			'warnings'   => $guard['warnings'],
 		);
 	}
 
@@ -305,6 +318,7 @@ class EMCP_Tools_Layout_Abilities {
 					'type'       => 'object',
 					'properties' => array(
 						'success' => array( 'type' => 'boolean' ),
+						'warnings' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 				'meta'                => array(
@@ -352,6 +366,10 @@ class EMCP_Tools_Layout_Abilities {
 			return new \WP_Error( 'not_container', __( 'Element is not a container. Use update-widget for widgets.', 'emcp-tools' ) );
 		}
 
+		// Partial classic dimensions: fill from the stored value or skip (#151).
+		$guard    = EMCP_Tools_Element_Factory::guard_settings( (array) $settings, (array) ( $element['settings'] ?? array() ), $element );
+		$settings = $guard['settings'];
+
 		$updated = $this->data->update_element_settings( $page_data, $element_id, $settings );
 
 		if ( ! $updated ) {
@@ -364,7 +382,7 @@ class EMCP_Tools_Layout_Abilities {
 			return $result;
 		}
 
-		return array( 'success' => true );
+		return array( 'success' => true, 'warnings' => $guard['warnings'] );
 	}
 
 	// -------------------------------------------------------------------------
@@ -376,7 +394,7 @@ class EMCP_Tools_Layout_Abilities {
 			'emcp-tools/update-element',
 			array(
 				'label'               => __( 'Update Element', 'emcp-tools' ),
-				'description'         => __( 'Updates settings on any element (container or widget). Settings are merged (partial update). Works for all element types, no need to know if the target is a container or widget. For v4 atomic elements you may also include a `styles` map (the element\'s local CSS classes) and/or `editor_settings` (e.g. `{ "title": "Hero" }` for the Navigator label) in the settings object, these are routed to the element root automatically. Use set-element-label for just the Navigator name.', 'emcp-tools' ),
+				'description'         => __( 'Updates settings on any element (container or widget). Settings are merged (partial update). Works for all element types, no need to know if the target is a container or widget. For v4 atomic elements you may also include a `styles` map (the element\'s local CSS classes) and/or `editor_settings` (e.g. `{ "title": "Hero" }` for the Navigator label) in the settings object, these are routed to the element root automatically. Styles merge too: variants match by breakpoint and state, each prop sent replaces the stored one, a prop set to null is removed, and props you leave out are kept. Use set-element-label for just the Navigator name.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_update_element' ),
 				'permission_callback' => array( $this, 'check_edit_permission' ),
@@ -404,6 +422,7 @@ class EMCP_Tools_Layout_Abilities {
 						'success'     => array( 'type' => 'boolean' ),
 						'element_id'  => array( 'type' => 'string' ),
 						'element_type' => array( 'type' => 'string' ),
+						'warnings' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 				'meta'                => array(
@@ -439,6 +458,10 @@ class EMCP_Tools_Layout_Abilities {
 			return new \WP_Error( 'element_not_found', __( 'Element not found.', 'emcp-tools' ) );
 		}
 
+		// Partial classic dimensions: fill from the stored value or skip (#151).
+		$guard    = EMCP_Tools_Element_Factory::guard_settings( (array) $settings, (array) ( $element['settings'] ?? array() ), $element );
+		$settings = $guard['settings'];
+
 		$updated = $this->data->update_element_settings( $page_data, $element_id, $settings );
 
 		if ( ! $updated ) {
@@ -455,6 +478,8 @@ class EMCP_Tools_Layout_Abilities {
 			'success'      => true,
 			'element_id'   => $element_id,
 			'element_type' => $element['elType'] ?? 'unknown',
+			// Widget keys that are not controls are saved but likely ignored (#152).
+			'warnings'     => array_merge( $guard['warnings'], EMCP_Tools_Widget_Setting_Keys::for_element( $element, (array) $settings ) ),
 		);
 	}
 
@@ -467,7 +492,7 @@ class EMCP_Tools_Layout_Abilities {
 			'emcp-tools/batch-update',
 			array(
 				'label'               => __( 'Batch Update Elements', 'emcp-tools' ),
-				'description'         => __( 'Updates multiple elements in a single save operation. Each operation specifies an element_id and settings to merge. Much more efficient than calling update-element multiple times. As with update-element, a per-operation settings object may include a `styles` map and/or `editor_settings` for v4 atomic elements, these are routed to the element root automatically.', 'emcp-tools' ),
+				'description'         => __( 'Updates multiple elements in a single save operation. Each operation specifies an element_id and settings to merge. Much more efficient than calling update-element multiple times. As with update-element, a per-operation settings object may include a `styles` map and/or `editor_settings` for v4 atomic elements, these are routed to the element root automatically and merge per variant prop (null removes a prop).', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_batch_update' ),
 				'permission_callback' => array( $this, 'check_edit_permission' ),
@@ -499,6 +524,7 @@ class EMCP_Tools_Layout_Abilities {
 						'success'  => array( 'type' => 'boolean' ),
 						'updated'  => array( 'type' => 'integer' ),
 						'failed'   => array( 'type' => 'array', 'items' => array( 'type' => 'object' ) ),
+						'warnings' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 				'meta'                => array(
@@ -529,6 +555,7 @@ class EMCP_Tools_Layout_Abilities {
 
 		$updated_count = 0;
 		$failed        = array();
+		$warnings      = array();
 
 		foreach ( $operations as $op ) {
 			$eid      = sanitize_text_field( $op['element_id'] ?? '' );
@@ -546,10 +573,18 @@ class EMCP_Tools_Layout_Abilities {
 				continue;
 			}
 
+			// Partial classic dimensions: fill from the stored value or skip (#151).
+			$guard    = EMCP_Tools_Element_Factory::guard_settings( (array) $settings, (array) ( $element['settings'] ?? array() ), $element );
+			$settings = $guard['settings'];
+
 			$ok = $this->data->update_element_settings( $page_data, $eid, $settings );
 
 			if ( $ok ) {
 				$updated_count++;
+				// Widget keys that are not controls are saved but likely ignored (#152).
+				foreach ( array_merge( $guard['warnings'], EMCP_Tools_Widget_Setting_Keys::for_element( $element, (array) $settings ) ) as $warning ) {
+					$warnings[] = $eid . ': ' . $warning;
+				}
 			} else {
 				$failed[] = array( 'element_id' => $eid, 'reason' => 'update failed' );
 			}
@@ -565,11 +600,12 @@ class EMCP_Tools_Layout_Abilities {
 			'success' => empty( $failed ),
 			'updated' => $updated_count,
 			'failed'  => $failed,
+			'warnings' => $warnings,
 		);
 	}
 
 	// -------------------------------------------------------------------------
-	// set-element-label (Navigator label — editor_settings.title)
+	// set-element-label (type-aware Navigator label)
 	// -------------------------------------------------------------------------
 
 	private function register_set_element_label(): void {
@@ -577,7 +613,7 @@ class EMCP_Tools_Layout_Abilities {
 			'emcp-tools/set-element-label',
 			array(
 				'label'               => __( 'Set Element Label', 'emcp-tools' ),
-				'description'         => __( 'Sets an element\'s Navigator label (stored in editor_settings.title). Works for any element; especially useful on v4 atomic elements to keep the layout readable. A convenience wrapper, the same result can be had via update-element with editor_settings.', 'emcp-tools' ),
+				'description'         => __( 'Sets and verifies an element\'s Navigator label. Classic elements use settings._title; atomic elements use root editor_settings.title. The same type-aware mapping is applied by update-element and batch-update when passed editor_settings.title.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_set_element_label' ),
 				'permission_callback' => array( $this, 'check_edit_permission' ),
@@ -638,8 +674,7 @@ class EMCP_Tools_Layout_Abilities {
 			return new \WP_Error( 'element_not_found', __( 'Element not found.', 'emcp-tools' ) );
 		}
 
-		// editor_settings is a sibling-root key; update_element_settings() hoists
-		// it out of the settings payload and deep-merges it into the element root.
+		// The data layer maps the label to the element type's native storage.
 		$updated = $this->data->update_element_settings(
 			$page_data,
 			$element_id,
@@ -654,6 +689,18 @@ class EMCP_Tools_Layout_Abilities {
 
 		if ( is_wp_error( $result ) ) {
 			return $result;
+		}
+
+		$saved = $this->data->get_page_data( $post_id );
+		if ( is_wp_error( $saved ) ) {
+			return $saved;
+		}
+		$element = $this->data->find_element_by_id( $saved, $element_id );
+		$stored_title = $element && EMCP_Tools_Data::is_atomic_element( $element )
+			? ( $element['editor_settings']['title'] ?? null )
+			: ( $element['settings']['_title'] ?? null );
+		if ( $stored_title !== $title ) {
+			return new \WP_Error( 'label_not_persisted', __( 'Elementor did not persist the requested Navigator label. Read back the page before retrying.', 'emcp-tools' ) );
 		}
 
 		return array(
@@ -751,7 +798,7 @@ class EMCP_Tools_Layout_Abilities {
 			if ( ! isset( $children_by_id[ $eid ] ) ) {
 				return new \WP_Error(
 					'invalid_element_id',
-					sprintf( __( 'Element "%s" is not a direct child of the container.', 'emcp-tools' ), $eid )
+					sprintf( /* translators: %s: element ID. */ __( 'Element "%s" is not a direct child of the container.', 'emcp-tools' ), $eid )
 				);
 			}
 		}

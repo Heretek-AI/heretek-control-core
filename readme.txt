@@ -3,7 +3,7 @@ Contributors: Heretek-AI, mianshahzadraza
 Tags: mcp, ai, automation, elementor, gutenberg
 Requires at least: 6.9
 Tested up to: 7.1
-Stable tag: 3.16.1
+Stable tag: 3.21.3
 Requires PHP: 8.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -12,19 +12,21 @@ Autonomous Model Context Protocol (MCP) server connecting site builders, themes,
 
 == Description ==
 
-Heretek Control Core connects your site to AI assistants and agents via the Model Context Protocol (MCP). It extends the official WordPress MCP Adapter to expose a comprehensive set of MCP tools that let AI agents like Claude, Cursor, and other MCP-compatible clients manage site content, configure settings, and manipulate page designs programmatically.
+Heretek Control Core connects your site to AI assistants and agents via the Model Context Protocol (MCP). It extends the official WordPress MCP Adapter to expose a comprehensive set of 550+ MCP tools that let AI agents like Claude, Cursor, and other MCP-compatible clients manage site content, configure settings, and manipulate page designs programmatically.
 
-As of v3.0.0 the 62 per-widget tools were folded into a catalog-backed model, so the active tool surface is much smaller while every widget stays reachable, and the toolset takes its first steps beyond Elementor with general WordPress content management, curated site-settings control, full plugin and theme management, media attachment management, safe user management, filesystem access, and database inspection over MCP. The v3.0.0 beyond-Elementor surface adds 8 WordPress Content tools + 3 surfaced WordPress core abilities + 2 WordPress Settings tools + 13 Plugins & Themes tools + 3 Media Library tools + 4 Users tools + 1 Performance Analyzer tool + 1 Security & Malware Scanner tool + 6 Filesystem tools + 6 Database tools. Tool counts scale with your environment (registered counts, verified on Elementor 4.1.4): around 107 tools on a free Elementor install, ~121 with the Elementor 4.0+ atomic elements, ~117 with Elementor Pro, and ~131 with Pro + Elementor 4.0+ (WooCommerce widgets are reached through add-pro-widget; the Pro build also registers a woo-read/woo-write dispatcher pair over products, orders, and customers). When Advanced Custom Fields (free or PRO) is active, 2 ACF tools register on top of any of those counts: `acf-read` and `acf-write`, two dispatchers that expose 15 ACF operations (8 read, 7 write; the Custom Post Type and taxonomy operations need ACF 6.1+). Each dispatcher is a single toggle under Tools → Plugins → ACF, listing the operations it covers; `acf-read` is on by default and `acf-write` ships off. About 39 other tools ship disabled-by-default (SEO & Accessibility, Widget Builder, PHP Snippets, the 9 Plugins & Themes write tools, delete-media, the 2 Users write tools, the 3 Filesystem write tools, and the 3 Database write tools), so the typical active surface is smaller.
+All enterprise abilities are permanently unlocked, including custom blocks and widgets, brand kits, prompt library, template library, project memory, cross-environment backup/migrate/sync, AI chat assistant, form integrations, SEO integrations, and custom agent skills.
 
 **Key Features:**
 
 * **Query & Discovery**: List widgets, inspect page structures, read element settings, browse templates, and view global design tokens.
 * **WordPress Content (beyond Elementor)**: Create and manage posts, pages, and any custom post type (content, status, taxonomy terms, custom fields, and featured images) via MCP, without touching Elementor data. Built on WP core; every post carries an `is_elementor` flag that steers agents to the Elementor tools for builder pages. (v3.0.0)
+* **Front-end Page HTML**: Fetch the public front-end HTML for a same-origin URL or published post ID with `get-page-html`. The read-only tool includes theme and SEO-plugin output, returns large documents in checksum-guarded chunks, and never forwards the connected user's credentials. It returns the server response source; JavaScript is not executed.
 * **WordPress Settings (beyond Elementor)**: Read and batch-update core WordPress settings (general/reading/writing/discussion/media/permalinks) over MCP. Curated allowlist only: no arbitrary option access; `admin_email` is read-only; permalink changes auto-flush rewrite rules. `manage_options`. (v3.0.0)
-* **Plugins & Themes (beyond Elementor)**: Discover, install (wordpress.org only), update, activate/deactivate, and delete plugins and themes over MCP. EMCP Tools and Elementor are protected; install/update/delete are disabled-by-default and per-op capability-gated. (v3.0.0)
+* **Plugins & Themes (beyond Elementor)**: Discover, install, update, activate/deactivate, and delete plugins and themes over MCP. Installs accept a wordpress.org slug or a confirmed, hash-verified ZIP first stored with `upload-media`; URLs, server paths, overwrites, unsafe archives, and protected destinations are refused. (v3.0.0)
 * **Media Library (beyond Elementor)**: Fetch full attachment detail, edit metadata (alt text, title, caption, description), and delete attachments over MCP. get/update are enabled by default; delete is disabled-by-default and requires explicit confirmation. (v3.0.0)
 * **Users (beyond Elementor)**: List and read WordPress users, and safely create/edit non-admin profiles over MCP. No delete and no role changes; new users get an auto-generated password by email (never returned); administrators are off-limits to editing. Reads enabled by default; create/update disabled-by-default. (v3.0.0)
-* **ACF / ACF PRO (beyond Elementor)**: Read and write Advanced Custom Fields values on posts and options pages, discover and author field groups, and register ACF-managed Custom Post Types and taxonomies (ACF 6.1+), enough to build a full content structure end-to-end. Full Pro field support (repeater, flexible content, gallery, group, clone) as nested JSON. Only registers when ACF is active; the 7 write tools ship disabled-by-default; no deletes and no slug/field renames. (v3.2.1)
+* **ACF / ACF PRO (beyond Elementor)**: Read and write Advanced Custom Fields values on posts and options pages, including agent-parsed document imports with whole-chunk validation, provenance, hash-bound confirmation, per-row results, and read-back. Full Pro field support (repeater, flexible content, gallery, group, clone) as nested JSON. No document parsing runs on WordPress. (v3.2.1)
+* **GSAP Integration (Pro)**: Locally bundles GSAP core and all 24 plugins from the official 3.15.0 distribution, registers stable WordPress script handles for pages, themes, and plugins, and provides per-plugin and loading-context switches plus MCP read/write management. Its dedicated `emcp-gsap` Agent Skill ships in both Skills-tab download formats and is also available through the runtime skill catalog. The module is opt-in. (v3.16.0)
 * **Meta Box (beyond Elementor)**: Read/write Meta Box custom-field values and discover field groups over MCP. Only registers when Meta Box is active; `metabox-read` is on by default, `metabox-write` ships disabled-by-default (values only, no delete; unknown fields are skipped rather than created). (v3.4.2)
 * **Forms (8 plugins, beyond Elementor)**: Two dispatcher tools per plugin (read/write) for Contact Form 7 (free) plus WPForms, Gravity Forms, Fluent Forms, Ninja Forms, Formidable, MetForm, and SureForms (Pro). Read forms, fields, notifications and entries; manage entries. Each pair registers only when its plugin is active; reads on, writes off by default; `delete-entry` needs `confirm:true`. (v3.5.0)
 * **SEO (7 plugins, beyond Elementor)**: Two dispatcher tools per plugin (read/write) for Slim SEO (free) plus Yoast, Rank Math, All in One SEO, SEOPress, The SEO Framework, and SureRank (Pro). Read/write post & term SEO metadata (title, description, canonical, robots, social) over one unified field set, plus schema-read where supported. (v3.5.0)
@@ -46,15 +48,15 @@ As of v3.0.0 the 62 per-widget tools were folded into a catalog-backed model, so
 * **Custom Code**: Add custom CSS (element/page level), inject JavaScript, create site-wide code snippets for head/body injection.
 * **AI Widget Builder (Pro)**: Let an AI agent design custom Elementor widgets from a structured spec (no hand-written PHP). The plugin compiles the spec into a sandboxed widget that appears in the Elementor panel: 35 control types, optional CSS/JS, with a runtime safety net so a bad widget can never break the editor.
 * **Brand Kits**: One-click color + typography kits that re-skin your whole site. 10 kits are free to apply (with backup + restore); 50+ with Pro.
-* **Low-tools Mode**: One-click toggle that trims the active tool list to a curated essentials set for MCP clients with strict tool caps (Antigravity, Gemini API, etc.). After the v3.0.0 widget consolidation the active count already fits most caps, so this is rarely needed now.
-* **Sample Prompts**: Ready-to-use landing page blueprints with one-click copy from the admin dashboard.
-* **Admin Dashboard**: Dedicated top-level menu with Tools, Connection, Prompts, Templates, Brand Kits, Skills, Widget Builder, and Changelog tabs. Toggle individual tools on/off, view connection configs for all supported MCP clients, and get help via the built-in Get Support link.
+* **Compact tool mode**: For MCP clients with strict tool caps (Antigravity, Gemini API and others), expose three dispatcher tools (list-tools, get-tool-schema, call-tool) instead of every tool. Each tool keeps its own permission check and on/off switch.
+* **Prompts**: Five free landing-page prompts, with a Customize panel for your builder, business name, colours, fonts and content before you copy one. EMCP Pro adds a library of 100 prompts across 20 categories (50 landing pages and 50 complete websites) and sends any prompt straight to AI Chat.
+* **Admin**: One EMCP Tools menu with a grouped sidebar (Overview, Setup, Build, Library, Safety) and a Ctrl or Cmd + K search. A Dashboard of what your AI did, a guided Connection setup that confirms your client's first call, per-tool switches, Modules, Page Builders, Prompts, Skills, Templates, Brand Kits, History with undo, Redirects, Backup & Migrate and an MCP Log.
 
 **Requires:**
 
 * WordPress 6.9 or later
 * WordPress Abilities API: included in WordPress core 6.9+
-* WordPress MCP Adapter: bundled with the plugin (no separate install needed; an active standalone MCP Adapter plugin is used instead when present)
+* MCP Adapter: included. EMCP Tools uses the free MCP Adapter plugin from WordPress.org (https://wordpress.org/plugins/mcp-adapter/) instead when it is active.
 
 **Recommended (optional):**
 
@@ -68,9 +70,10 @@ As of v3.0.0 the 62 per-widget tools were folded into a catalog-backed model, so
 
 == Installation ==
 
-1. Upload the `heretek-control-core` folder to `/wp-content/plugins/`.
-2. Activate the plugin through the 'Plugins' menu in WordPress. The MCP Adapter is bundled. No separate install is required (WordPress 6.9+ already includes the Abilities API).
-3. Open the new **Heretek Core** top-level menu, go to the **Connection** tab, and confirm **Activate Abilities API for EMCP** is enabled (on by default) to expose the MCP server.
+1. Upload the `emcp-tools` folder to `/wp-content/plugins/`.
+2. Activate the plugin through the 'Plugins' menu in WordPress. EMCP Tools includes the MCP Adapter it needs (WordPress 6.9+ already includes the Abilities API).
+3. Open the new **EMCP Tools** top-level menu and go to **Connection**. The MCP server and the **Abilities API** switch (under **Advanced settings**) are on by default. Follow the four steps to connect your AI client; the last step confirms its first call.
+
 4. (Optional) Install and activate [Elementor](https://wordpress.org/plugins/elementor/) (version 3.20+) to enable the Elementor tool family (page design, widgets, layout, templates, brand kits, and more). All beyond-Elementor tools are fully functional without it.
 
 = WP-CLI Connection (Local) =
@@ -156,11 +159,21 @@ Yes. The free/core widgets are added via `add-free-widget` and work with free El
 
 = Can I disable specific tools? =
 
-Yes. Open the **EMCP Tools** top-level admin menu and use the **Tools** screen to toggle individual tools on or off. If your MCP client has a strict tool cap (e.g. Antigravity's 100-tool limit), flip on **Low-tools mode** at the top of that screen to expose only a curated set of essentials.
+Yes. Open the **EMCP Tools** top-level admin menu and use the **Tools** screen to toggle individual tools on or off. If your MCP client has a strict tool cap (e.g. Antigravity's 100-tool limit), turn on **Compact tool mode** on that screen, which exposes three dispatcher tools instead of every tool while keeping all of them reachable.
 
 = Does this plugin require the WordPress MCP Adapter? =
 
-Yes. The MCP Adapter handles the MCP protocol transport layer. This plugin registers its tools through the Adapter's server infrastructure.
+Yes. The MCP Adapter handles the MCP protocol transport layer, and this plugin registers its tools through it. EMCP Tools includes a copy, so nothing else is needed. If you prefer the free MCP Adapter plugin from WordPress.org, the Connection screen installs and activates it in one click, and EMCP Tools then uses it.
+
+= What does EMCP Tools store in the database? =
+
+Settings are WordPress options named `emcp_tools_*`. Since 3.18.0 History lives in its own table, `{prefix}emcp_changes`, with its state in `emcp_tools_changes_*` options (store, schema version, retention, cutover and notices). The MCP request log is `emcp_tools_mcp_request_log` (500 rows), daily activity counts are `emcp_tools_activity_daily` (90 days), and the Dashboard's attention items are cached in the `emcp_tools_attention` transient, with dismissals in the `emcp_tools_attention_dismissed` user meta. Context sections and the site profile are `emcp_tools_context_sections` and `emcp_tools_site_profile`. On Pro, scheduled backups use `emcp_tools_backup_schedule`. Redirects keep their `{prefix}emcp_redirects` table and the search index its `{prefix}emcp_search_index` table. After the move to the History table, the old history is kept for 30 days in `emcp_tools_changelog_premigration` as a recovery copy.
+
+Deleting the plugin removes the tool switches, the EMCP Cloud connection, the AI Chat keys and model list, the cached Pro libraries and the Sandbox widgets with their files. It keeps History, the MCP log, activity counts, redirects, the search index, context settings and backups, so a reinstall picks up where you left off; remove those tables and options yourself if you want them gone.
+
+= Does History keep personal data? =
+
+History keeps a before-image of every change it can undo, for its retention period (90 days by default, EMCP Tools > History). For the CRM, booking and course integrations that includes the personal data of the contacts, customers or students a change touched. Erasing a FluentCRM contact or a MailPoet subscriber removes their data from History as well, including a MailPoet erasure through WordPress's privacy tools. Summaries name people by id only, and the MCP request log keeps no tool arguments.
 
 = Is this plugin safe to use on production sites? =
 
@@ -170,6 +183,36 @@ The plugin enforces WordPress capability checks on every tool. Read operations r
 
 On shared LiteSpeed hosting (e.g. Hostinger) this is usually the host caching/buffering or timing out the request, not the plugin. The MCP route already sends no-store/no-cache headers; in addition: exclude `/wp-json/mcp/` from LiteSpeed Cache (Cache -> Excludes -> Do Not Cache URIs), raise PHP `max_execution_time` (>=60) and the concurrent PHP worker limit, and check the new **EMCP Tools -> MCP Log** tab (with `WP_DEBUG` on it records the underlying error) to tell a real error from a transport timeout. For large operations use `build-page` `dry_run`, `sideload-image` `convert_webp:false`, and `get-page-structure` `summary:true`.
 
+= Where is the source code for the admin screens? =
+
+The admin screens ship compiled in `assets/admin/build/`. Their full source and build setup are in the public repository at https://github.com/msrbuilds/elementor-mcp (the `admin-src` and `admin-build` folders), and the tag `v<version>` matches each release. The Pro plugin includes its own source in the download.
+
+== External services ==
+
+EMCP Tools works on your own site. It contacts the services below only in the situations described. Services marked (Pro) are used by the Pro edition only.
+
+**EMCP Cloud (emcptools.com).** Used only after an administrator connects the site on Connection > Cloud. Connecting sends the site address and a generated site ID and stores OAuth tokens. While connected, the plugin renews the connection in the background about once a week, so a quiet site stays connected, and sends what each feature you use needs: Marketplace installs and Sandbox artifact sync send or receive widget, block and snippet bundles; settings sync sends the tool and module settings on its allowlist; Safe Updates sends the update offers, job progress and receipts of a job you approved in Cloud; Static Site sends a generation request ID and the site identity so a generation can be counted. Leaving "Let EMCP Cloud manage this site through the gateway" switched on also uploads a revocable credential for the site's own MCP server. The WP-CLI command `wp emcp cloud onboard` sends the site ID, address and enrolment grant. [Terms of service](https://emcptools.com/terms-of-service), [privacy policy](https://emcptools.com/privacy).
+
+**EMCP notifications (emcptools.com).** EMCP admin screens fetch the product announcements shown in the notifications drawer, at most every six hours. The request carries no site data beyond what any web request sends (IP address and WordPress user agent). Same terms and privacy policy as above.
+
+**EMCP Pro libraries and usage counts (emcptools.com, Pro).** The Prompts, Templates, Brand Kits and Skills screens download their libraries with the licence key, licence ID, site address and plugin version, so the server can confirm the licence. Applying a template or copying a prompt sends a usage event (the item, the licence key and ID, and the site address) that feeds the popularity counts shown on those screens. Same terms and privacy policy as above.
+
+**Freemius (freemius.com).** Licensing, account and Pro updates, and the optional opt-in shown on activation. What is sent is described on the opt-in screen. [Terms](https://freemius.com/terms/), [privacy policy](https://freemius.com/privacy/).
+
+**GitHub (api.github.com).** The free edition checks the latest release of msrbuilds/elementor-mcp so WordPress can offer updates, at most every six hours, and downloads the release ZIP when you update. No site data is sent. [Terms](https://docs.github.com/site-policy/github-terms/github-terms-of-service), [privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
+
+**WordPress.org (api.wordpress.org, downloads.wordpress.org).** The plugin and theme tools search, install and update from the WordPress.org directory, and the security scan compares core files with the official checksums. Plugin, theme and WordPress version numbers are sent. [Privacy policy](https://wordpress.org/about/privacy/).
+
+**Stock photos: Unsplash, Pexels, Pixabay.** Only when an AI agent searches for images and you have added that service's API key on the Connection screen. The key and the search terms are sent. Unsplash [terms](https://unsplash.com/terms) and [privacy](https://unsplash.com/privacy); Pexels [terms](https://www.pexels.com/terms-of-service/) and [privacy](https://www.pexels.com/privacy-policy/); Pixabay [terms](https://pixabay.com/service/terms/) and [privacy](https://pixabay.com/service/privacy/).
+
+**Image and page URLs you or your agent supply.** Sideloading an image downloads it from the given address. In Pro, the AI Chat web fetch tool downloads the page the model asks for.
+
+**AI model providers (Pro AI Chat).** Only with your own API key, when you chat: Anthropic, OpenAI, OpenRouter, Google Gemini, DeepSeek, Moonshot, Z.ai, OpenCode, or a local Ollama or LM Studio server. Your messages, the page context and tool results are sent to the provider you pick, under that provider's terms and privacy policy. The list of available models is refreshed weekly with the same key.
+
+**Live data widgets (Pro).** Custom widgets that use a live data source call the service you configure, with the key you add under Connection > Live data providers: OpenWeather, Google Places, Yelp Fusion, or a JSON address you enter. Each request sends the key and the location, place or business you set.
+
+**Your own sites (Pro).** Backup & Migrate pushes signed archives to a destination site you paired, and the Oxygen design library reads from an Oxygen site you choose.
+
 == Screenshots ==
 
 1. Tools management page with category-grouped toggles.
@@ -177,21 +220,615 @@ On shared LiteSpeed hosting (e.g. Hostinger) this is usually the host caching/bu
 
 == Changelog ==
 
+= 3.21.3 =
+
+Quiet sites stay connected to EMCP Cloud, page builders no longer disappear after a vendor update, and Pro gains Flatsome and Amelia Pro.
+
+* New in Pro: Flatsome builder and theme tools for Flatsome Site Builder and the Flatsome Block Theme 1.0.0-beta.7 or later, child themes included. Writes start disabled and are recorded in History.
+* New in Pro: Amelia Pro 9.9.1 or later works with the existing Amelia tools, with undo covering extras, galleries, package prices and deletion links.
+* Fixed: Quiet sites needed a reconnect in wp-admin. Gateway credentials keep their full life when they rotate, and a daily background check renews a Cloud connection that has not renewed for a week. A site that already lapsed needs one last reconnect. A connection made before 3.19 starts renewing after its next Cloud call.
+* Fixed: A page builder showed "Not detected" after the vendor released a newer version. Builders and block packs now accept their tested version and every later one.
+* Improved: Compact tool mode now reports which tools only read.
+
+= 3.21.2 =
+
+Fixes pulling settings from EMCP Cloud and wp-admin errors for non-administrators on some sites, and corrects the ChatGPT App connection steps.
+
+* Fixed: Every wp-admin page showed a critical error for users who are not administrators when another plugin added a menu item with no capability.
+* Fixed: Pulling settings from EMCP Cloud now explains why it failed (for example, nothing pushed yet), reports how many settings it applied, keeps tools that newer versions switch off switched off, and can be undone from History.
+* Fixed: The cloud-config-sync MCP tool now applies pulled settings and pushes this site's own settings.
+* Fixed: The ChatGPT App steps on the Connection screen now match the app's Plugins flow.
+
+= 3.21.1 =
+
+Ten native plugin integrations, six of them free, plus fixes for the EMCP Cloud Gateway and for Safe Updates on MariaDB.
+
+* New: Free integrations for Redirection, Custom Post Type UI, Pods, WP Mail SMTP, LiteSpeed Cache and Wordfence. Wordfence is read-only; LiteSpeed cache invalidation requires a supported server.
+* New in Pro: FluentSMTP, Flamingo, Site Kit and Ultimate Member. Site Kit reads local setup, authentication and module state.
+* New write tools start disabled. Enable them explicitly on the Tools screen.
+* Improved: Native write verification, conflict-aware undo, partial-write recovery, nested sensitive-field filtering and mail-test receipts that prevent accidental replay.
+* Fixed: EMCP Cloud showed "Gateway unavailable" after updating to 3.21.0. A request without an MCP-Protocol-Version header now uses the version its session negotiated.
+* Fixed: Safe Updates reported "Could not verify database table ownership" on MariaDB sites whose database account has no role enabled.
+* Fixed: With WP_DEBUG on and Elementor inactive, every MCP request logged a "list-pages not found" notice.
+* Changed: The product name is now "MCP Tools for WordPress & Page Builders". Tool names and the server address are unchanged.
+
+= 3.21.0 =
+
+Incident-response tools for a hacked site, contributed by @Mrshahidali420, a switch to keep new tools on after updates, binary file writes, and fixes for subdirectory multisite OAuth, backups, the connection steps and five user reports.
+
+* New: scan-security has a compromise audit: hidden twin-folder back doors, back-dated files, search-engine cloaking, publicly downloadable backups, suspicious must-use plugins and orphaned scheduled tasks, plus three new malware rules.
+* New: quarantine-file, restore-quarantined-file and list-quarantine move a suspicious file out of the site without losing it, renamed so it cannot run, and back again from History.
+* New: harden-site and get-hardening-status switch off XML-RPC, hide the WordPress version, block user enumeration and hide PHP errors, each undoable.
+* New: search-access-log finds the request behind a hack in the web server access logs.
+* New: list-processes and kill-process find and stop a watcher process that keeps rewriting files (Linux; server processes are never stopped).
+* New: "Turn on new tools after updates" on the Tools screen: tools that updates add switched off arrive switched on instead.
+* New: write-file writes binary files (images, fonts, ZIP) with encoding "base64", up to 5 MB.
+* The tools that change the site, read server logs or list processes ship switched off.
+* Fixed: Atomic headings, paragraphs and buttons rendered empty on Elementor 4.3. The tools now write the text format the installed Elementor expects, and any write to a page converts text stored in the old format.
+* Fixed: A styles write through update-element or batch-update replaced the whole variant. Props now merge one by one; null removes a prop.
+* Fixed: An Elementor write to a page open in your own editor with unsaved changes is now refused, as it already was for other users, so Force Save can no longer throw it away. Retry with ignore_open_editor: true if the editor was closed without saving.
+* Fixed: insert-row returned the id of its History entry instead of the new row's id. Writes that match no rows are no longer recorded.
+* Fixed: upload-svg-icon is now recorded in History and can be undone.
+* Fixed: OAuth sign-in works on the subsites of a subdirectory multisite.
+* Fixed: the Connection wizard shows ChatGPT's current MCP settings path and a Codex command that Codex accepts.
+* Changed: EMCP Tools uses the official MCP Adapter plugin from WordPress.org when it is active, so plugins that need MCP Adapter 0.7 work next to it and WordPress no longer reports a duplicate copy. Otherwise its built-in copy, updated to 0.7.1, serves as before; the Connection screen can install and activate the official plugin in one click.
+* Security: on a network-activated multisite, installing the MCP Adapter network-wide from the Connection screen now needs network administrator rights.
+* Fixed: Cloud Safe Updates handles many more sites: database checks and large tables in small checked pieces, exact restores of BIT, FLOAT, ENUM and SET values, cleanup of tables a failed update added, and support for WP Rocket and 10Web Booster page caches.
+* Fixed: Image Optimization's WebP copies were no smaller than the JPEGs. WebP is now made from the original at its own quality (automatic: 15 below Quality), and on sample photos is 15% smaller than the JPEG.
+* Fixed: Cached pages showed JPEG or WebP to everyone depending on the first visitor. With "Serve WebP on the site" on, every visitor gets WebP, and Elementor's cache is flushed when the module or its WebP settings change and after a bulk run.
+* Security: full backups no longer include wp-config.php, which holds the database password and the site's secret keys.
+
+= 3.20.0 =
+
+Static Site generation through EMCP Cloud, backups kept out of the web root with retention for every backup, a Block Builder that honors block styles on the front end with a real repeater, and a fix for sites where another plugin took over EMCP's licence details.
+
+* New: Static Site module. Turn your site into plain HTML files, download them as a ZIP, keep them in a folder, or serve them to visitors. Generations are counted by your EMCP Cloud account: 3 free, plus a monthly allowance with an EMCP Pro licence.
+* New: GeneratePress theme settings (palette, colors, layout, body font size) are now free; the write tool ships switched off. GenerateBlocks stays in Pro.
+* Security: GeneratePress, Astra and Kadence settings writes are checked by type, as each theme's Customizer does, so a value can no longer inject CSS or a script into the theme's inline styles.
+* Fixed: GeneratePress body font size now changes the font size on GeneratePress 3.1 and later, and the Kadence global palette is saved where Kadence reads it.
+* Fixed: History can undo database tool changes (insert-row, update-rows, delete-rows) and All in One SEO post changes again, row by row with conflict checks. Writes over 500 rows are refused.
+* New: Term tools for categories, tags and custom taxonomies: list-terms, get-term, create-term, update-term and delete-term (off by default), each undoable from History.
+* Security: Backups are kept outside the web root when possible, otherwise in an unguessable, fully protected folder. Set EMCP_BACKUP_DIR in wp-config.php to choose the folder. A weekly check warns if your web server serves it. Existing backups move automatically.
+* Security: The migration connector (1.4.0) keeps received archives and restore files private, and cleans them up.
+* Fixed: Backups made by hand or by an AI agent keep the newest 10 by default, with an optional size limit and a daily cleanup of leftovers.
+* Fixed: The Account page no longer shows another plugin's name and version when a site manager such as ManageWP installed EMCP. Affected sites need this version installed once by hand or through the site manager.
+* Fixed: Custom Gutenberg blocks now apply their color, spacing, typography, border and shadow settings on the front end.
+* New: Custom blocks get a repeater attribute, sidebar panels with help text, the theme color palette and media thumbnails.
+* Fixed: Block attribute names that WordPress reserves are refused for new blocks; existing and imported blocks keep working.
+* Fixed: Bricks: interactions, conditions and global classes are accepted, custom CSS works on Bricks 2.4, options switched off with false stay off, and imported images keep their source.
+* New: Bricks context reports the root font size and Bricks' own abilities; the Bricks skill gains an HTML import guide.
+* Improved: Collapsible admin sidebar sections, notification cards with icons, and a History & Settings tab on Backup & Migrate.
+* Fixed: A selective Sync with tables named without the prefix, or matching none, could push the whole database; such selections now resolve correctly or are refused.
+* Security: The database write tools accept only real column names, the OAuth screen shows bad requests as an error instead of redirecting, and changing Sandbox widgets and blocks needs unfiltered_html.
+* Fixed: A post containing the Themer Post Content block no longer crashes.
+* Improved: Visitors' page views no longer load the admin screens' server code, AI Chat, the Backup & Migrate engine or the Static Site generator.
+* Fixed: The Templates library is saved in small parts, so hosts with a small database packet limit no longer download it on every screen load; Prompts and Brand Kits are stored once.
+* Improved: Deactivation stops EMCP's maintenance tasks, uninstall cleans every site of a network and more leftovers, and each page view runs fewer queries.
+* Improved: Translation loading and template, translator notes, an External services section in this readme, licence notices for bundled code, and local Dashboard thumbnails.
+
+= 3.19.3 =
+
+Cloud Safe Updates compatibility, progress reporting and snapshot performance improvements for hosted WordPress sites, including Hostinger and WP Launcher.
+
+* Improved: Drain countdown, snapshot file and database progress, and latest site confirmation in Cloud.
+* Improved: Resumable snapshot scans, bounded file copying, batched database exports and verified unchanged-file snapshot reuse, with a fresh database snapshot for every group.
+* Fixed: Reuse one database connection per snapshot batch to avoid connection bursts on shared hosting.
+
+* Fixed: Hostinger AI history tables are checked by structure instead of being mistaken for another WordPress installation based on names. They remain included in snapshots and rollback; genuine overlapping installations and unreadable metadata still block updates.
+* Fixed: Standard writable MU plugins are included in snapshots and standalone recovery, including when an MU plugin fails. Custom MU-plugin paths, drop-ins and external object caches remain blocked when recovery cannot safely cover them.
+* Fixed: Preserve WP Launcher's root .wp-launcher-ready marker. Other unwritable WordPress files and unsafe symlinks still block updates.
+
+= 3.19.2 =
+
+Security update with review hardening for OAuth, menus and loops, and Cloud Safe Updates for reviewing plugin, theme and WordPress updates with a snapshot and automatic restore.
+
+* New: Cloud Safe Updates. Workspace owners can review and run a connected site's plugin, theme and WordPress updates from EMCP Cloud in groups, each with a file and database snapshot, a short maintenance page, page checks and automatic restore of a failed group. Unsupported sites, including a database shared with another WordPress install under the same table prefix, are refused before anything changes. If Cloud stops responding before any update ran, the site reopens on its own at the deadline, interrupted restores resume, and finished jobs keep only a status receipt.
+
+* Security: Restrict credentialed Unsplash requests to the exact trusted HTTPS origin and disable redirects, preventing API key disclosure through crafted image URLs.
+* Security: Require management authorization and a valid settings nonce before interpreting posted tool toggles, preventing unauthorized changes during pending defaults updates.
+* Security: Stricter OAuth and request handling: typed request values, malformed tokens, hosts and addresses refused, sign-in return to the configured origin, and a consent page that cannot be framed.
+* Security: Menu output is filtered, Elementor notices stay on EMCP screens, and EMCP styles and loop scripts load through WordPress's own queues.
+* Security (Pro): EMCP Themer's condition search validates its inputs and only returns posts you can read.
+
+= 3.19.1 =
+
+Patch release: Cloud buttons on the Connection screen work again, and uninstalling the plugin now completes and removes everything it stored.
+
+* Fixed: The Cloud Connect, Disconnect, gateway and re-issue buttons on the Connection screen no longer fail with "The link you followed has expired". The links carried an HTML-escaped "&amp;" that dropped the security token (reported by a customer; #158 by @amiriqbalmcs).
+* Fixed: The v1 prompts download on the Prompts screen no longer fails the same way.
+* Fixed: Deleting the plugin from the Plugins screen no longer stops with a fatal error. The uninstall stopped at the custom widget step, so PHP snippets, Pro blocks, Project Memory and AI Chat data were left behind.
+* Fixed: Uninstalling now removes everything EMCP stored in the database: the OAuth clients and tokens (#157 by @amiriqbalmcs), History, redirects, the search index, Backup & Migrate records and paired sites, every EMCP option, transient and user setting, and its scheduled tasks. Your pages, EMCP Themer templates, Brand Kit backups and backup archive files are kept.
+
+= 3.19.0 =
+
+Ten Pro plugin integrations, from Polylang and Tutor LMS to Amelia and MailPoet, each with undo, plus security hardening, management access control and Cloud onboarding.
+
+* Security: MCP post writes check the post type's own create, publish and author capabilities, and restores need edit rights on their target.
+* Security: Sitewide Elementor templates (headers, footers, popups, theme templates with conditions) need edit_theme_options to edit or delete, everywhere. Editors without it lose access to those templates.
+* Security: EMCP Themer templates with an attached PHP template are editable only by administrators with unfiltered_html.
+* Security: OAuth token exchange, refresh and revocation, and the Cloud Gateway credential, are serialized per client to close race conditions; databases without MySQL named locks use an options-table lock instead.
+
+* Fixed: Integration write contracts and recovery: FluentCRM rejects unknown import keys, LifterLMS quiz limits require their switches, MailPoet campaign names are saved and undoable, and FunnelKit scratch steps/designs follow its API. Incomplete FunnelKit step writes are recorded without replay or automatic deletion; observed step ownership must be checked before recovery.
+
+* New: Site-local management access policy with an optional administrator allowlist, consistent screen and endpoint checks, stale-update protection and host WP-CLI recovery. Cloud shows the acting WordPress account. While a list is set, EMCP Themer templates (menu, editors, REST and Themer tools) follow it for administrators and editors alike. The list can also be set, and locked, in wp-config.php with the EMCP_TOOLS_MANAGEMENT_ADMINS constant (comma-separated IDs, an array, or 'all'). Other MCP execution identities and permissions remain separate; settings sync cannot overwrite the local policy.
+
+* New: Managed configuration inspection, confirmed apply, durable operation receipts and conflict-aware rollback for Cloud profiles. Uses a fixed settings allowlist without credentials, licences or free-text context. Atomic InnoDB writes preserve before-images and refuse stale previews or rollback over later edits. Requires the matching Cloud and Gateway rollout; deployment is disabled by default in Cloud.
+
+* New: Unattended Cloud onboarding with short-lived, workspace-scoped enrollment grants. WP-CLI and the manifest runner read the grant from the environment; Gateway activation requires explicit consent. Requires the matching Cloud deployment.
+
+* New: Operator-run Cloud onboarding from WP-CLI: a read-only preflight, a pinned browser approval per site, then explicit Gateway consent.
+* New: Cloud protection for cloned sites: a copied site cannot use the original's Cloud connection, and Connection > Cloud can create a separate identity for it.
+* Fixed: Cloud refresh throttling (HTTP 408, 429 and server errors) keeps the connection and retries later instead of asking for reconnection.
+* Changed: The Plugins and Themes tabs on the Tools screen show one compact row per integration, with its Read and Write switches and operation counts side by side.
+* Fixed: Connection step 3 keeps a chosen existing application password selected, and a browser-filled login password never reaches a config.
+* Fixed: Meta Box and ACF switches on the Tools screen follow their plugin instead of looking live without it.
+* Changed: The Facebook community invitation moved from the WordPress Dashboard into EMCP's announcement bar, the What's new announcement describes 3.19.0, and Management access sits below Page Builders in the sidebar.
+
+Builds FunnelKit funnels and email automations over MCP, translates sites with Polylang and TranslatePress, builds TablePress tables, Tutor LMS and LifterLMS courses, The Events Calendar events, Amelia bookings, FluentCRM contacts, campaigns and automations, and MailPoet subscribers, newsletters and automations: new Pro tools drive each plugin through its own controllers, with confirm, dry run and History undo.
+
+* New: FunnelKit Funnel Builder write tool (Pro, #143): funnels, steps, checkout products and fields, order bumps, upsells, opt-in and thank-you pages, A/B tests, the store checkout, and template and funnel imports. Deletes need confirm; creates and updates accept dry_run; History records and undoes the writes.
+* New: FunnelKit Automations read and write tools (Pro, #144): automations, contacts, tags, lists, fields, broadcasts, templates, form feeds, link triggers, audiences, bulk actions and allowlisted settings. Sends and deletes need confirm; credential routes are never reachable.
+* New: History records actions it cannot undo, with the reason.
+* Changed: funnelkit-read now covers order bumps, upsells, A/B tests, analytics and exports.
+* New: emcp-funnelkit agent skill (Pro).
+* New: Polylang read and write tools (Pro): languages, settings, menus per language, language assignment, links, term and string translations. Works with Polylang free; writes ship disabled.
+* New: Translate a page in a few calls: create-translation copies a page into another language and links it, get-page-text and apply-page-text move its text out and back in one call each, set-status publishes it. Writes are all or nothing.
+* New: Translations never change the original page: Polylang's copying between translations is held back while EMCP writes.
+* New: emcp-polylang agent skill (Pro).
+* New: TranslatePress read and write tools (Pro): every string of a page with its sentence context, string search, gettext strings, progress, and the translation language. Works with TranslatePress free; writes ship disabled.
+* New: TranslatePress writes are all or nothing, never overwrite a reviewed translation or a newer change, and commit together with their History entry.
+* New: emcp-translatepress agent skill (Pro).
+* New: TablePress read and write tools (Pro): create, edit, import, export, copy, rename, delete, style and place tables on Elementor and Gutenberg pages. Works with TablePress free; writes ship disabled.
+* New: TablePress writes check the version they read, are put back when TablePress leaves them half done, and are undone from History.
+* New: emcp-tablepress agent skill (Pro).
+* New: Tutor LMS read and write tools (Pro): courses, topics, lessons, quizzes, the curriculum order, publishing, and enrolments in free courses, through Tutor's own course builder code. Works with Tutor LMS free; writes ship disabled.
+* New: Tutor LMS writes change only the fields they name, check the version they read, never touch students' quiz work and are undone from History.
+* New: emcp-tutor agent skill (Pro).
+* New: LifterLMS read and write tools (Pro): courses, sections, lessons, quizzes, the curriculum order, publishing, access plans, memberships and enrolments, through LifterLMS's own abilities. Works with LifterLMS 10.1 or later; writes ship disabled.
+* New: LifterLMS writes change only the fields they name, check the version they read, treat a membership enrolment and its courses as one change, never touch students' work and are undone from History.
+* New: emcp-lifterlms agent skill (Pro).
+* New: The Events Calendar read and write tools (Pro): events with their dates, time zones, venues, organizers, categories and tags, publishing, cancelled and postponed status, venues, organizers and event categories, through TEC's own PHP layer. Works with The Events Calendar 6.x; writes ship disabled.
+* New: The Events Calendar writes change only the fields they name, start events as drafts, check TEC's calendar tables after every write, keep drafts private, never trash a venue in use and are undone from History.
+* New: Amelia read and write tools (Pro): service categories, services, employees with their working hours and days off, customers, appointments, free time slots, events and attendees, through Amelia's own controllers. Works with Amelia 2.4 or later, Lite included; writes ship disabled.
+* New: Amelia writes keep every other field, email no customer unless asked, report every message Amelia sends, survive a throw inside Amelia without losing a write, refuse what Amelia Lite would drop, and are undone from History.
+* New: FluentCRM read and write tools (Pro): contacts, tags, lists, custom fields, notes, imports, email templates, campaigns and automations, through FluentCRM's own abilities and REST API. Works with FluentCRM 3.x; writes ship disabled.
+* New: FluentCRM writes run no automation unless asked, email nobody without confirm, protect linked WordPress users, never resubscribe an opted-out contact on undo, and are undone from History.
+* New: Erasing a FluentCRM contact also removes its data from History (a new free `redact()` seam).
+* New: MailPoet read and write tools (Pro): subscribers, lists, tags, custom fields, imports, block-editor newsletters, test sends, sending, schedules and automation status, through MailPoet's own code. Works with MailPoet 5.x; writes ship disabled.
+* New: MailPoet writes start no automation or welcome email unless asked, email nobody without confirm, never rewrite MailPoet's consent record, and are undone from History; erasing a subscriber, also through WordPress's privacy tools, removes them from History.
+* Fixed: History offered some large integration entries as undoable when their blockers would refuse the undo.
+* New: The Connection screen and the Dashboard name another plugin's MCP Adapter copy when it is the one loaded (Amelia loads an older copy before EMCP).
+* New: emcp-events-calendar agent skill (Pro).
+* New: emcp-amelia, emcp-fluentcrm and emcp-mailpoet agent skills (Pro), and the emcp-plugins skill names the plugins with a skill of their own.
+* Changed: History undoes multi-row changes in one database transaction.
+* Fixed: Themer Post Content now shows the password form for a password-protected post instead of its content.
+
+= 3.18.1 =
+
+Fixes a missing MCP endpoint on sites running Elementor 4.3.3 with Elementor's own MCP server switched off, keeps link buttons readable when clicked, and adds a Cloud connection status to the top bar.
+
+* Fixed: The MCP endpoint no longer goes missing with Elementor 4.3.3. With Elementor's own MCP feature off, Elementor turns off the MCP adapter's default server, which EMCP relied on to load its tools, so AI clients got a 404 while the Connection screen said the server was enabled. EMCP now loads its tools itself before registering the server.
+* Fixed: Buttons that are links no longer turn blue on blue when clicked; every button style keeps its colours on hover, click and focus.
+* New: A Cloud connection status beside Server online in the top bar (connected, needs attention, or not connected) while the Cloud module is on.
+* New: The free Prompts and Brand Kits screens show a banner with what the Pro library adds.
+* Changed: The free zip no longer includes the admin source files; they are in the public GitHub repository, tagged per release.
+
+= 3.18.0 =
+
+Adds a loop builder to EMCP Themer, so one post card can be repeated in grids and carousels in Elementor or Gutenberg, a Pro module that exports your active Sandbox widgets, blocks and snippets as a standalone plugin, OpenCode Go and OpenCode Zen in AI Chat, custom agent skills, and a Pro prompt library of 100 prompts you can customize before copying. The whole admin is redesigned, with a Dashboard, guided connection setup, History sessions and diffs, an MCP Log, and scheduled backups on Pro. It also fixes a crash with Themer image sources in Elementor, blank padding and margin sides, and curated widget settings that Elementor ignored.
+
+* New: Loop Items, Loop Grid and Loop Carousel in EMCP Themer (free). Design one post card and repeat it in a responsive grid or a carousel, in Elementor or Gutenberg, with queries over posts, the current archive, related posts, a manual selection or WooCommerce products, and pagination from page numbers to load more and infinite scroll. Free includes one Loop Item; Pro adds unlimited Loop Items and alternate templates for the Loop Grid widget.
+* New: OpenCode Go and OpenCode Zen in AI Chat (Pro, #150). Two new providers; their requests go through a server relay because OpenCode's API refuses browser requests, and your keys stay on the server. OpenCode describes Go as designed for coding agents, so review its terms before use. Zen bills a prepaid balance that reloads = 3.21.3 =
+
+Quiet sites stay connected to EMCP Cloud, page builders no longer disappear after a vendor update, and Pro gains Flatsome and Amelia Pro.
+
+* New in Pro: Flatsome builder and theme tools for Flatsome Site Builder and the Flatsome Block Theme 1.0.0-beta.7 or later, child themes included. Writes start disabled and are recorded in History.
+* New in Pro: Amelia Pro 9.9.1 or later works with the existing Amelia tools, with undo covering extras, galleries, package prices and deletion links.
+* Fixed: Quiet sites needed a reconnect in wp-admin. Gateway credentials keep their full life when they rotate, and a daily background check renews a Cloud connection that has not renewed for a week. A site that already lapsed needs one last reconnect. A connection made before 3.19 starts renewing after its next Cloud call.
+* Fixed: A page builder showed "Not detected" after the vendor released a newer version. Builders and block packs now accept their tested version and every later one.
+* Improved: Compact tool mode now reports which tools only read.
+
+= 3.21.2 =
+
+Fixes pulling settings from EMCP Cloud and wp-admin errors for non-administrators on some sites, and corrects the ChatGPT App connection steps.
+
+* Fixed: Every wp-admin page showed a critical error for users who are not administrators when another plugin added a menu item with no capability.
+* Fixed: Pulling settings from EMCP Cloud now explains why it failed (for example, nothing pushed yet), reports how many settings it applied, keeps tools that newer versions switch off switched off, and can be undone from History.
+* Fixed: The cloud-config-sync MCP tool now applies pulled settings and pushes this site's own settings.
+* Fixed: The ChatGPT App steps on the Connection screen now match the app's Plugins flow.
+
+= 3.21.1 =
+
+Ten native plugin integrations, six of them free, plus fixes for the EMCP Cloud Gateway and for Safe Updates on MariaDB.
+
+* New: Free integrations for Redirection, Custom Post Type UI, Pods, WP Mail SMTP, LiteSpeed Cache and Wordfence. Wordfence is read-only; LiteSpeed cache invalidation requires a supported server.
+* New in Pro: FluentSMTP, Flamingo, Site Kit and Ultimate Member. Site Kit reads local setup, authentication and module state.
+* New write tools start disabled. Enable them explicitly on the Tools screen.
+* Improved: Native write verification, conflict-aware undo, partial-write recovery, nested sensitive-field filtering and mail-test receipts that prevent accidental replay.
+* Fixed: EMCP Cloud showed "Gateway unavailable" after updating to 3.21.0. A request without an MCP-Protocol-Version header now uses the version its session negotiated.
+* Fixed: Safe Updates reported "Could not verify database table ownership" on MariaDB sites whose database account has no role enabled.
+* Fixed: With WP_DEBUG on and Elementor inactive, every MCP request logged a "list-pages not found" notice.
+* Changed: The product name is now "MCP Tools for WordPress & Page Builders". Tool names and the server address are unchanged.
+
+= 3.21.0 =
+
+Incident-response tools for a hacked site, contributed by @Mrshahidali420, a switch to keep new tools on after updates, binary file writes, and fixes for subdirectory multisite OAuth, backups, the connection steps and five user reports.
+
+* New: scan-security has a compromise audit: hidden twin-folder back doors, back-dated files, search-engine cloaking, publicly downloadable backups, suspicious must-use plugins and orphaned scheduled tasks, plus three new malware rules.
+* New: quarantine-file, restore-quarantined-file and list-quarantine move a suspicious file out of the site without losing it, renamed so it cannot run, and back again from History.
+* New: harden-site and get-hardening-status switch off XML-RPC, hide the WordPress version, block user enumeration and hide PHP errors, each undoable.
+* New: search-access-log finds the request behind a hack in the web server access logs.
+* New: list-processes and kill-process find and stop a watcher process that keeps rewriting files (Linux; server processes are never stopped).
+* New: "Turn on new tools after updates" on the Tools screen: tools that updates add switched off arrive switched on instead.
+* New: write-file writes binary files (images, fonts, ZIP) with encoding "base64", up to 5 MB.
+* The tools that change the site, read server logs or list processes ship switched off.
+* Fixed: Atomic headings, paragraphs and buttons rendered empty on Elementor 4.3. The tools now write the text format the installed Elementor expects, and any write to a page converts text stored in the old format.
+* Fixed: A styles write through update-element or batch-update replaced the whole variant. Props now merge one by one; null removes a prop.
+* Fixed: An Elementor write to a page open in your own editor with unsaved changes is now refused, as it already was for other users, so Force Save can no longer throw it away. Retry with ignore_open_editor: true if the editor was closed without saving.
+* Fixed: insert-row returned the id of its History entry instead of the new row's id. Writes that match no rows are no longer recorded.
+* Fixed: upload-svg-icon is now recorded in History and can be undone.
+* Fixed: OAuth sign-in works on the subsites of a subdirectory multisite.
+* Fixed: the Connection wizard shows ChatGPT's current MCP settings path and a Codex command that Codex accepts.
+* Changed: EMCP Tools uses the official MCP Adapter plugin from WordPress.org when it is active, so plugins that need MCP Adapter 0.7 work next to it and WordPress no longer reports a duplicate copy. Otherwise its built-in copy, updated to 0.7.1, serves as before; the Connection screen can install and activate the official plugin in one click.
+* Security: on a network-activated multisite, installing the MCP Adapter network-wide from the Connection screen now needs network administrator rights.
+* Fixed: Cloud Safe Updates handles many more sites: database checks and large tables in small checked pieces, exact restores of BIT, FLOAT, ENUM and SET values, cleanup of tables a failed update added, and support for WP Rocket and 10Web Booster page caches.
+* Fixed: Image Optimization's WebP copies were no smaller than the JPEGs. WebP is now made from the original at its own quality (automatic: 15 below Quality), and on sample photos is 15% smaller than the JPEG.
+* Fixed: Cached pages showed JPEG or WebP to everyone depending on the first visitor. With "Serve WebP on the site" on, every visitor gets WebP, and Elementor's cache is flushed when the module or its WebP settings change and after a bulk run.
+* Security: full backups no longer include wp-config.php, which holds the database password and the site's secret keys.
+
+= 3.20.0 =
+
+Static Site generation through EMCP Cloud, backups kept out of the web root with retention for every backup, a Block Builder that honors block styles on the front end with a real repeater, and a fix for sites where another plugin took over EMCP's licence details.
+
+* New: Static Site module. Turn your site into plain HTML files, download them as a ZIP, keep them in a folder, or serve them to visitors. Generations are counted by your EMCP Cloud account: 3 free, plus a monthly allowance with an EMCP Pro licence.
+* New: GeneratePress theme settings (palette, colors, layout, body font size) are now free; the write tool ships switched off. GenerateBlocks stays in Pro.
+* Security: GeneratePress, Astra and Kadence settings writes are checked by type, as each theme's Customizer does, so a value can no longer inject CSS or a script into the theme's inline styles.
+* Fixed: GeneratePress body font size now changes the font size on GeneratePress 3.1 and later, and the Kadence global palette is saved where Kadence reads it.
+* Fixed: History can undo database tool changes (insert-row, update-rows, delete-rows) and All in One SEO post changes again, row by row with conflict checks. Writes over 500 rows are refused.
+* New: Term tools for categories, tags and custom taxonomies: list-terms, get-term, create-term, update-term and delete-term (off by default), each undoable from History.
+* Security: Backups are kept outside the web root when possible, otherwise in an unguessable, fully protected folder. Set EMCP_BACKUP_DIR in wp-config.php to choose the folder. A weekly check warns if your web server serves it. Existing backups move automatically.
+* Security: The migration connector (1.4.0) keeps received archives and restore files private, and cleans them up.
+* Fixed: Backups made by hand or by an AI agent keep the newest 10 by default, with an optional size limit and a daily cleanup of leftovers.
+* Fixed: The Account page no longer shows another plugin's name and version when a site manager such as ManageWP installed EMCP. Affected sites need this version installed once by hand or through the site manager.
+* Fixed: Custom Gutenberg blocks now apply their color, spacing, typography, border and shadow settings on the front end.
+* New: Custom blocks get a repeater attribute, sidebar panels with help text, the theme color palette and media thumbnails.
+* Fixed: Block attribute names that WordPress reserves are refused for new blocks; existing and imported blocks keep working.
+* Fixed: Bricks: interactions, conditions and global classes are accepted, custom CSS works on Bricks 2.4, options switched off with false stay off, and imported images keep their source.
+* New: Bricks context reports the root font size and Bricks' own abilities; the Bricks skill gains an HTML import guide.
+* Improved: Collapsible admin sidebar sections, notification cards with icons, and a History & Settings tab on Backup & Migrate.
+* Fixed: A selective Sync with tables named without the prefix, or matching none, could push the whole database; such selections now resolve correctly or are refused.
+* Security: The database write tools accept only real column names, the OAuth screen shows bad requests as an error instead of redirecting, and changing Sandbox widgets and blocks needs unfiltered_html.
+* Fixed: A post containing the Themer Post Content block no longer crashes.
+* Improved: Visitors' page views no longer load the admin screens' server code, AI Chat, the Backup & Migrate engine or the Static Site generator.
+* Fixed: The Templates library is saved in small parts, so hosts with a small database packet limit no longer download it on every screen load; Prompts and Brand Kits are stored once.
+* Improved: Deactivation stops EMCP's maintenance tasks, uninstall cleans every site of a network and more leftovers, and each page view runs fewer queries.
+* Improved: Translation loading and template, translator notes, an External services section in this readme, licence notices for bundled code, and local Dashboard thumbnails.
+
+= 3.19.3 =
+
+Cloud Safe Updates compatibility, progress reporting and snapshot performance improvements for hosted WordPress sites, including Hostinger and WP Launcher.
+
+* Improved: Drain countdown, snapshot file and database progress, and latest site confirmation in Cloud.
+* Improved: Resumable snapshot scans, bounded file copying, batched database exports and verified unchanged-file snapshot reuse, with a fresh database snapshot for every group.
+* Fixed: Reuse one database connection per snapshot batch to avoid connection bursts on shared hosting.
+
+* Fixed: Hostinger AI history tables are checked by structure instead of being mistaken for another WordPress installation based on names. They remain included in snapshots and rollback; genuine overlapping installations and unreadable metadata still block updates.
+* Fixed: Standard writable MU plugins are included in snapshots and standalone recovery, including when an MU plugin fails. Custom MU-plugin paths, drop-ins and external object caches remain blocked when recovery cannot safely cover them.
+* Fixed: Preserve WP Launcher's root .wp-launcher-ready marker. Other unwritable WordPress files and unsafe symlinks still block updates.
+
+= 3.19.2 =
+
+Security update with review hardening for OAuth, menus and loops, and Cloud Safe Updates for reviewing plugin, theme and WordPress updates with a snapshot and automatic restore.
+
+* New: Cloud Safe Updates. Workspace owners can review and run a connected site's plugin, theme and WordPress updates from EMCP Cloud in groups, each with a file and database snapshot, a short maintenance page, page checks and automatic restore of a failed group. Unsupported sites, including a database shared with another WordPress install under the same table prefix, are refused before anything changes. If Cloud stops responding before any update ran, the site reopens on its own at the deadline, interrupted restores resume, and finished jobs keep only a status receipt.
+
+* Security: Restrict credentialed Unsplash requests to the exact trusted HTTPS origin and disable redirects, preventing API key disclosure through crafted image URLs.
+* Security: Require management authorization and a valid settings nonce before interpreting posted tool toggles, preventing unauthorized changes during pending defaults updates.
+* Security: Stricter OAuth and request handling: typed request values, malformed tokens, hosts and addresses refused, sign-in return to the configured origin, and a consent page that cannot be framed.
+* Security: Menu output is filtered, Elementor notices stay on EMCP screens, and EMCP styles and loop scripts load through WordPress's own queues.
+* Security (Pro): EMCP Themer's condition search validates its inputs and only returns posts you can read.
+
+= 3.19.1 =
+
+Patch release: Cloud buttons on the Connection screen work again, and uninstalling the plugin now completes and removes everything it stored.
+
+* Fixed: The Cloud Connect, Disconnect, gateway and re-issue buttons on the Connection screen no longer fail with "The link you followed has expired". The links carried an HTML-escaped "&amp;" that dropped the security token (reported by a customer; #158 by @amiriqbalmcs).
+* Fixed: The v1 prompts download on the Prompts screen no longer fails the same way.
+* Fixed: Deleting the plugin from the Plugins screen no longer stops with a fatal error. The uninstall stopped at the custom widget step, so PHP snippets, Pro blocks, Project Memory and AI Chat data were left behind.
+* Fixed: Uninstalling now removes everything EMCP stored in the database: the OAuth clients and tokens (#157 by @amiriqbalmcs), History, redirects, the search index, Backup & Migrate records and paired sites, every EMCP option, transient and user setting, and its scheduled tasks. Your pages, EMCP Themer templates, Brand Kit backups and backup archive files are kept.
+
+= 3.19.0 =
+
+Ten Pro plugin integrations, from Polylang and Tutor LMS to Amelia and MailPoet, each with undo, plus security hardening, management access control and Cloud onboarding.
+
+* Security: MCP post writes check the post type's own create, publish and author capabilities, and restores need edit rights on their target.
+* Security: Sitewide Elementor templates (headers, footers, popups, theme templates with conditions) need edit_theme_options to edit or delete, everywhere. Editors without it lose access to those templates.
+* Security: EMCP Themer templates with an attached PHP template are editable only by administrators with unfiltered_html.
+* Security: OAuth token exchange, refresh and revocation, and the Cloud Gateway credential, are serialized per client to close race conditions; databases without MySQL named locks use an options-table lock instead.
+
+* Fixed: Integration write contracts and recovery: FluentCRM rejects unknown import keys, LifterLMS quiz limits require their switches, MailPoet campaign names are saved and undoable, and FunnelKit scratch steps/designs follow its API. Incomplete FunnelKit step writes are recorded without replay or automatic deletion; observed step ownership must be checked before recovery.
+
+* New: Site-local management access policy with an optional administrator allowlist, consistent screen and endpoint checks, stale-update protection and host WP-CLI recovery. Cloud shows the acting WordPress account. While a list is set, EMCP Themer templates (menu, editors, REST and Themer tools) follow it for administrators and editors alike. The list can also be set, and locked, in wp-config.php with the EMCP_TOOLS_MANAGEMENT_ADMINS constant (comma-separated IDs, an array, or 'all'). Other MCP execution identities and permissions remain separate; settings sync cannot overwrite the local policy.
+
+* New: Managed configuration inspection, confirmed apply, durable operation receipts and conflict-aware rollback for Cloud profiles. Uses a fixed settings allowlist without credentials, licences or free-text context. Atomic InnoDB writes preserve before-images and refuse stale previews or rollback over later edits. Requires the matching Cloud and Gateway rollout; deployment is disabled by default in Cloud.
+
+* New: Unattended Cloud onboarding with short-lived, workspace-scoped enrollment grants. WP-CLI and the manifest runner read the grant from the environment; Gateway activation requires explicit consent. Requires the matching Cloud deployment.
+
+* New: Operator-run Cloud onboarding from WP-CLI: a read-only preflight, a pinned browser approval per site, then explicit Gateway consent.
+* New: Cloud protection for cloned sites: a copied site cannot use the original's Cloud connection, and Connection > Cloud can create a separate identity for it.
+* Fixed: Cloud refresh throttling (HTTP 408, 429 and server errors) keeps the connection and retries later instead of asking for reconnection.
+* Changed: The Plugins and Themes tabs on the Tools screen show one compact row per integration, with its Read and Write switches and operation counts side by side.
+* Fixed: Connection step 3 keeps a chosen existing application password selected, and a browser-filled login password never reaches a config.
+* Fixed: Meta Box and ACF switches on the Tools screen follow their plugin instead of looking live without it.
+* Changed: The Facebook community invitation moved from the WordPress Dashboard into EMCP's announcement bar, the What's new announcement describes 3.19.0, and Management access sits below Page Builders in the sidebar.
+
+Builds FunnelKit funnels and email automations over MCP, translates sites with Polylang and TranslatePress, builds TablePress tables, Tutor LMS and LifterLMS courses, The Events Calendar events, Amelia bookings, FluentCRM contacts, campaigns and automations, and MailPoet subscribers, newsletters and automations: new Pro tools drive each plugin through its own controllers, with confirm, dry run and History undo.
+
+* New: FunnelKit Funnel Builder write tool (Pro, #143): funnels, steps, checkout products and fields, order bumps, upsells, opt-in and thank-you pages, A/B tests, the store checkout, and template and funnel imports. Deletes need confirm; creates and updates accept dry_run; History records and undoes the writes.
+* New: FunnelKit Automations read and write tools (Pro, #144): automations, contacts, tags, lists, fields, broadcasts, templates, form feeds, link triggers, audiences, bulk actions and allowlisted settings. Sends and deletes need confirm; credential routes are never reachable.
+* New: History records actions it cannot undo, with the reason.
+* Changed: funnelkit-read now covers order bumps, upsells, A/B tests, analytics and exports.
+* New: emcp-funnelkit agent skill (Pro).
+* New: Polylang read and write tools (Pro): languages, settings, menus per language, language assignment, links, term and string translations. Works with Polylang free; writes ship disabled.
+* New: Translate a page in a few calls: create-translation copies a page into another language and links it, get-page-text and apply-page-text move its text out and back in one call each, set-status publishes it. Writes are all or nothing.
+* New: Translations never change the original page: Polylang's copying between translations is held back while EMCP writes.
+* New: emcp-polylang agent skill (Pro).
+* New: TranslatePress read and write tools (Pro): every string of a page with its sentence context, string search, gettext strings, progress, and the translation language. Works with TranslatePress free; writes ship disabled.
+* New: TranslatePress writes are all or nothing, never overwrite a reviewed translation or a newer change, and commit together with their History entry.
+* New: emcp-translatepress agent skill (Pro).
+* New: TablePress read and write tools (Pro): create, edit, import, export, copy, rename, delete, style and place tables on Elementor and Gutenberg pages. Works with TablePress free; writes ship disabled.
+* New: TablePress writes check the version they read, are put back when TablePress leaves them half done, and are undone from History.
+* New: emcp-tablepress agent skill (Pro).
+* New: Tutor LMS read and write tools (Pro): courses, topics, lessons, quizzes, the curriculum order, publishing, and enrolments in free courses, through Tutor's own course builder code. Works with Tutor LMS free; writes ship disabled.
+* New: Tutor LMS writes change only the fields they name, check the version they read, never touch students' quiz work and are undone from History.
+* New: emcp-tutor agent skill (Pro).
+* New: LifterLMS read and write tools (Pro): courses, sections, lessons, quizzes, the curriculum order, publishing, access plans, memberships and enrolments, through LifterLMS's own abilities. Works with LifterLMS 10.1 or later; writes ship disabled.
+* New: LifterLMS writes change only the fields they name, check the version they read, treat a membership enrolment and its courses as one change, never touch students' work and are undone from History.
+* New: emcp-lifterlms agent skill (Pro).
+* New: The Events Calendar read and write tools (Pro): events with their dates, time zones, venues, organizers, categories and tags, publishing, cancelled and postponed status, venues, organizers and event categories, through TEC's own PHP layer. Works with The Events Calendar 6.x; writes ship disabled.
+* New: The Events Calendar writes change only the fields they name, start events as drafts, check TEC's calendar tables after every write, keep drafts private, never trash a venue in use and are undone from History.
+* New: Amelia read and write tools (Pro): service categories, services, employees with their working hours and days off, customers, appointments, free time slots, events and attendees, through Amelia's own controllers. Works with Amelia 2.4 or later, Lite included; writes ship disabled.
+* New: Amelia writes keep every other field, email no customer unless asked, report every message Amelia sends, survive a throw inside Amelia without losing a write, refuse what Amelia Lite would drop, and are undone from History.
+* New: FluentCRM read and write tools (Pro): contacts, tags, lists, custom fields, notes, imports, email templates, campaigns and automations, through FluentCRM's own abilities and REST API. Works with FluentCRM 3.x; writes ship disabled.
+* New: FluentCRM writes run no automation unless asked, email nobody without confirm, protect linked WordPress users, never resubscribe an opted-out contact on undo, and are undone from History.
+* New: Erasing a FluentCRM contact also removes its data from History (a new free `redact()` seam).
+* New: MailPoet read and write tools (Pro): subscribers, lists, tags, custom fields, imports, block-editor newsletters, test sends, sending, schedules and automation status, through MailPoet's own code. Works with MailPoet 5.x; writes ship disabled.
+* New: MailPoet writes start no automation or welcome email unless asked, email nobody without confirm, never rewrite MailPoet's consent record, and are undone from History; erasing a subscriber, also through WordPress's privacy tools, removes them from History.
+* Fixed: History offered some large integration entries as undoable when their blockers would refuse the undo.
+* New: The Connection screen and the Dashboard name another plugin's MCP Adapter copy when it is the one loaded (Amelia loads an older copy before EMCP).
+* New: emcp-events-calendar agent skill (Pro).
+* New: emcp-amelia, emcp-fluentcrm and emcp-mailpoet agent skills (Pro), and the emcp-plugins skill names the plugins with a skill of their own.
+* Changed: History undoes multi-row changes in one database transaction.
+* Fixed: Themer Post Content now shows the password form for a password-protected post instead of its content.
+
+= 3.18.1 =
+
+Fixes a missing MCP endpoint on sites running Elementor 4.3.3 with Elementor's own MCP server switched off, keeps link buttons readable when clicked, and adds a Cloud connection status to the top bar.
+
+* Fixed: The MCP endpoint no longer goes missing with Elementor 4.3.3. With Elementor's own MCP feature off, Elementor turns off the MCP adapter's default server, which EMCP relied on to load its tools, so AI clients got a 404 while the Connection screen said the server was enabled. EMCP now loads its tools itself before registering the server.
+* Fixed: Buttons that are links no longer turn blue on blue when clicked; every button style keeps its colours on hover, click and focus.
+* New: A Cloud connection status beside Server online in the top bar (connected, needs attention, or not connected) while the Cloud module is on.
+* New: The free Prompts and Brand Kits screens show a banner with what the Pro library adds.
+* Changed: The free zip no longer includes the admin source files; they are in the public GitHub repository, tagged per release.
+
+= 3.18.0 =
+
+Adds a loop builder to EMCP Themer, so one post card can be repeated in grids and carousels in Elementor or Gutenberg, a Pro module that exports your active Sandbox widgets, blocks and snippets as a standalone plugin, OpenCode Go and OpenCode Zen in AI Chat, custom agent skills, and a Pro prompt library of 100 prompts you can customize before copying. The whole admin is redesigned, with a Dashboard, guided connection setup, History sessions and diffs, an MCP Log, and scheduled backups on Pro. It also fixes a crash with Themer image sources in Elementor, blank padding and margin sides, and curated widget settings that Elementor ignored.
+
+* New: Loop Items, Loop Grid and Loop Carousel in EMCP Themer (free). Design one post card and repeat it in a responsive grid or a carousel, in Elementor or Gutenberg, with queries over posts, the current archive, related posts, a manual selection or WooCommerce products, and pagination from page numbers to load more and infinite scroll. Free includes one Loop Item; Pro adds unlimited Loop Items and alternate templates for the Loop Grid widget.
+* New: OpenCode Go and OpenCode Zen in AI Chat (Pro, #150). Two new providers; their requests go through a server relay because OpenCode's API refuses browser requests, and your keys stay on the server. OpenCode describes Go as designed for coding agents, so review its terms before use. Zen bills a prepaid balance that reloads $20 below $5 by default. Gemini models are not offered on Zen (use the Gemini provider), and Zen's free models are hidden because OpenCode limits them to its own client.
+* New: Works alongside Elementor's own MCP server (Elementor 4.3+). EMCP's Elementor tools refuse to write to a page another user has open with unsaved changes, tell an open editor when a page changed, and tell connected agents which server to use for which job. The admin bar item now reads EMCP.
+* Fixed: Themer dynamic images and links in Elementor. Binding the Featured Image, Site Logo or Author Avatar source to an Elementor image or background no longer crashes the page, and the Featured Image size setting now takes effect.
+* Fixed: A padding, margin, border radius or border width sent with some sides blank is no longer saved in a way that makes Elementor drop the whole rule; blank sides are filled from the saved value or the setting is left unchanged, and the warning says which (#151).
+* Fixed: The Brand Kits tab no longer disappears when Elementor is not the selected page builder; it follows its module switch, like Templates.
+* Fixed: The Skills tab now disappears from the sidebar and the Dashboard when the Agent Skills module is off.
+* Fixed: Restoring a full backup no longer brings back that backup's own "running" record, which showed in History as a stale 0-byte backup (Pro). Backups leave out EMCP's backup and job tables, and a restore keeps the site's own backup history.
+* Fixed: Bricks 2.4 compatibility. The Bricks integration can now be enabled on Bricks 2.4.x, verified natively on 2.4.1.
+* Fixed: 55 curated widget parameters used names Elementor does not recognise, so their values were ignored; all are corrected or removed, catalog defaults now use values Elementor accepts (progress bars show their percentage and code blocks their line numbers and copy button again), and the widget tools now warn about unrecognised settings. Re-send values set under the old names (#152).
+* Changed: EMCP Themer is off by default on new installs; turn it on from EMCP Tools > Modules. Sites that already use it keep it on.
+* New: Starter prompts in AI Chat (Pro). A new chat suggests six prompts above the message box, your most used one first and the rest shuffled from ones you have not tried: site tasks on the AI Chat page, page tasks in the editors.
+* New: Sandbox Plugin Export (Pro module, on by default). Package every active Sandbox widget, block and PHP snippet as a standalone plugin that keeps working after EMCP Tools is deactivated. Identities are preserved, the runtime the widgets call is bundled, API keys come from constants, and the export stays dormant while EMCP Tools is active.
+
+* New: A redesigned admin. Every screen was rebuilt in one frame with a grouped sidebar, a search palette (Ctrl or Cmd + K), notifications, a save bar and a recovery panel. The old screens and the admin-ajax handlers only they used are removed; no MCP tools were added or removed.
+* New: Dashboard with AI activity over 7, 14 or 30 days, the most used tools, recent changes with Undo, a health strip, and Needs your attention (server off, unrecorded changes, sandbox review, disabled tools, updates, Cloud, and on Pro backups).
+* New: Guided connection setup that waits for your client's first MCP call and confirms it.
+* New: History with sessions, diffs, search and filters, session undo and a retention setting, stored in its own table (migrated automatically).
+* Changed: Reconnect your AI clients after updating; a client that stays connected keeps the previous version and its changes are not recorded until it reconnects.
+* New: MCP Log screen with filters and CSV export.
+* New: Scheduled backups (Pro), daily or weekly through WP-Cron, with retention and a Continue option if WP-Cron stalls.
+* New: Redirects can match a query string; existing redirects behave as before.
+* New: Context sections and a site profile for what connected agents are told, with a preview.
+* Changed: Sandbox items created over MCP are always drafts; activate them on the Sandbox screens.
+* New: Custom skills (Pro). Write your own agent playbooks in a full editor under Skills > Custom skills; switched-on skills join the skills catalog beside the bundled ones.
+* New: Customize a prompt (builder, business name, colours, fonts, content) before copying it; on Pro, Use in AI Chat opens AI Chat in a new tab with the prompt filled in.
+* New: The Pro prompt library grows to 100 prompts across 20 categories, adding 50 complete-website prompts.
+* Changed: add-pro-widget is on by default on new installs (it registers only with Elementor Pro); existing sites keep their choice.
+* Changed: The Marketplace screen loads a slimmer listing, shows five cards per row and pages 20 at a time.
+
+= 3.17.1 =
+
+Patch release: three data-safety fixes for Elementor writes, a Cloud gateway reconnect fix, an OAuth discovery fix for sites running a second MCP plugin, and a community-contributed Visibility SEO integration.
+
+* Fixed: update-page-settings merges into the stored settings instead of replacing the whole object, so a one-key patch on the active kit no longer wipes custom colors, typography presets and site identity (#145).
+* Fixed: update-global-colors refuses the system color ids (primary, secondary, text, accent) instead of writing a shadow custom color, and reports which ids it wrote (#145).
+* Fixed: Dimension values (margin, padding, gap, border) are stored as strings so the Elementor editor's Layout panel shows the real value instead of 0 (#146).
+* Fixed: Third-party widgets Elementor cannot instantiate in the current context (FunnelKit Pro, CartFlows checkout forms) are no longer silently dropped when another element on the page is edited over MCP (#143).
+* Fixed: Reconnecting to EMCP Cloud re-issues or withdraws the gateway credential according to the gateway box, and a Re-issue gateway credential button covers a credential revoked or lost outside a reconnect (#148).
+* Fixed: OAuth discovery answers only the well-known paths scoped to EMCP's own MCP resource, so a second OAuth-capable MCP plugin on the same site (path-based issuer) can serve its own discovery document and connect without switching EMCP sign-in off.
+* New: Visibility SEO integration, free, two tools, read and write, over Visibility's per-post SEO metadata including robots flags, Open Graph fields and the Schema.org type override. Contributed by Fernando Tellado (#141, #149).
+
+= 3.17.0 =
+
+Adds independent page-builder integrations and Gutenberg block packs, expands Widget Builder data controls, bundles native authoring skills, and strengthens History recording and rollback.
+
+* New: Dedicated page-builder integrations. Bricks, Breakdance, Avada, Divi 5, Thrive Architect, Oxygen 6, Kirki, WPBakery, Beaver Builder and Visual Composer join the existing Elementor and BeBuilder workflows. Each has its own tools and sections. Availability follows the installed vendor version and tested scope; optional vendor features may remain read-only or unsupported.
+* New: Page Builders management screen. Choose one standalone builder integration while keeping Gutenberg available. Inactive builder tools stay out of discovery, and new write tools start disabled.
+* Improved: Independent Gutenberg block packs. Spectra, Kadence Blocks, GenerateBlocks, Blocksy Blocks and Otter Blocks have independent toggles and dedicated tools. Theme settings remain in Themes; Blocksy Companion extensions and Pro Content Blocks have separate plugin tools.
+* New: Otter Free and Pro support. Adds 19 tools for native block discovery and editing, local patterns, generated page styles and allowlisted feature settings. Verified with 45 registered blocks in Free and 63 with Pro. Static blocks retain native Gutenberg markup.
+* Improved: Oxygen integration coverage. Adds native library, template, component and design-system workflows, version-aware schemas, conditional data handling and recovery checks. The bundled skill and integration guide document tested write boundaries.
+* New: Widget Builder data controls. Queries can supply posts, products, terms, menus, site data, breadcrumbs, carts and remote JSON. Allowlisted shortcode providers support saved Elementor templates and form plugins. Live data keys have a dedicated Connection section and remain outside cloud settings sync.
+* Fixed: Widget control collisions. Reserved Elementor setting names are rejected so a custom control cannot accidentally hide a widget through entrance-animation settings. Structured control defaults and live registry synchronization improve generated widget behavior.
+* Improved: Bundled authoring skills. Builder-specific guidance is available in runtime discovery and both downloadable skill formats, with native editor contracts, test findings and upstream attribution.
+* Fixed: Templates module visibility. The Templates page follows its module toggle even when another builder is selected. The current library remains Elementor-specific. The general Elementor installation notice no longer appears merely because Elementor is absent.
+* Maintenance: Shared agent guidance. AGENTS.md is the single source of project guidance; CLAUDE.md imports it. Native integration probes, MCP smoke fixtures and regression tests accompany the implementation.
+
+* Fixed: create-page records one creation event and returns its change_id. Undo removes the created page, including its initial Elementor content.
+* New: upload-media records a creation event and returns its change_id. Undo removes the attachment and verifies deletion of recorded WordPress-managed files, including generated sizes on Windows.
+* Fixed: Page settings and custom CSS changes record exact prior metadata for undo, preserve absence and escaped values, and invalidate Elementor caches. Identical CSS saves do not add redundant entries.
+* Improved: Conflict guards protect later creation edits, metadata, taxonomy assignments, user fields, ACF values, and changed upload bytes. Unrelated post-field changes remain intact.
+* Fixed: Failed restoration or History persistence no longer reports ordinary rollback success. Missing backups and occupied IDs are refused, and failed ledger cleanup retains its snapshots.
+* Changed: Incomplete or unverified database, legacy post, and generic attachment-deletion snapshots refuse automatic undo even with force. History explains unavailability and retains snapshots for inspection. Previously omitted actions are not reconstructed; rollback coverage remains operation-specific.
+
 = 3.16.1 =
-* Added: Native Ad Monetization & ExoClick MCP engine (emcp-tools/ads-read and ads-write) with automated zone provisioning, WP Quads dual-write synchronization, ads.txt validation, and cache invalidation.
-* Changed: Standardized all administrative navigation, dashboard cards, views, and documentation to official professional WordPress and AI terminology.
-* Fixed: AI Chat settings card layout resets to prevent form table vertical stretching under admin forms.
+
+Fixes detected server URLs on plain-permalink WordPress sites in both Free and Pro.
+
+* Fixed: Remove the trailing index.php from the detected Server URL while preserving subdirectory paths. Corrects the default displayed on the Connection tab and the site URL embedded in generated .mcpb bundles (#142).
 
 = 3.16.0 =
-Backup, Restore & Migrate become real: honest .emcp archives, a working restore path, a site-wide serialized-safe URL search-replace, and a genuine HMAC connector for migrate-site push.
-* Added: the Backup & Migrate tab can now Restore an archive (manifest-hash verified), Download it, or Delete it (admin-only, nonce + capability-gated), with a restore-history panel.
-* Added: restore verifies database.sql against the manifest sha256, imports it (skipping session transaction-control directives), rewrites the source URL to this site — serialized-safe and JSON-aware, so `_elementor_data` and length-prefixed options migrate correctly — and places any bundled files back under wp-content (traversal-guarded; never wp-config.php).
-* Added: `create-backup` now bundles a full database dump (bounded, row-streamed) plus optional site files (`include_files`); archives carry a richer manifest (format version, URL, php/wp/db, DB hash + row stats, file count).
-* Added: `migrate-site` is no longer a stub. It pushes this site to a standalone **EMCP Connector** (`connector/emcp-connector.php`, downloadable from the Backup & Migrate tab) as HMAC-SHA256-signed 2 MB packets over the connector REST API; the connector verifies the whole archive and restores it. Requires `confirm:true`. `direction: "pull"` is not implemented and returns a clear error.
-* Added: `sync-to-live` is a real site-wide serialized-safe URL search-and-replace across options, posts, postmeta (incl. `_elementor_data`), comments, term/usermeta, and other prefixed tables — recorded in Change History for one-click rollback.
-* Fixed: three never-registered "sync" tools (list-syncable-changes, sync-content-item, discard-sync-change) removed from the Tools grid and catalog.
-* Fixed: the AI Chat module id is now `ai-chat` (matching the admin), its REST route only registers while the module is active (a true kill switch), and it defaults on per the documented Pro behavior.
-* Docs: corrected over-claims in README/readme (WooCommerce op list, addon slug aliases, atomic-tool wording, tool counts).
+
+Adds structured imports, uploaded package installs, broader ACF coverage, FunnelKit reads, GSAP integration, and correct Hello Elementor Themer rendering.
+
+* New: GSAP Integration is an opt-in Pro module with locally bundled GSAP 3.15.0 core and all 24 distributed plugins, stable WordPress handles, per-plugin and context controls, dependency resolution, MCP read/write dispatchers, and a dedicated Agent Skill included in both downloadable skill formats.
+* New: FunnelKit Funnel Builder read support (Pro) adds five operations for funnels and ordered steps, decoded funnel-page configuration, checkout products with effective prices, and checkout fields in saved order (#140). Automations, contacts, statistics, and writes remain outside 3.16.0.
+* New: ACF and WooCommerce accept bounded structured imports extracted by an agent from PDF, spreadsheet, CSV, DOCX, OCR, or other source documents; WordPress validates and writes the structured payload without parsing the source file server-side.
+* New: plugin and theme installers accept confirmed, SHA-256-bound ZIP attachments uploaded through the media tool, with archive, compatibility, traversal, symlink, overwrite, and protected-destination guards.
+* Improved: ACF Free and Pro coverage is runtime-discoverable and type-aware, including nested Pro values, clone sources, relationship updates, field-group settings, and full validation before mutation.
+* Improved: Change History now shows 20 entries per page with result counts and previous, next, and numbered controls; filters and row actions retain the current History page.
+* Fixed: EMCP Themer headers and footers now replace Hello Elementor 3.x native parts through Hello's real render-time filter, without duplicate output or interference with settings checks and Elementor Pro precedence (#138).
+
+= 3.15.2 =
+
+Restores the intended formatting of the 3.15.1 release notes in plugin changelog views.
+
+* Fixed: the 3.15.1 changelog now keeps the required spacing between its heading, summary, and bullet list so WordPress-compatible readme renderers display it correctly.
+
+= 3.15.1 =
+
+Fixes AI Chat for the latest OpenAI models, reduces token usage, and restores cross-site settings sync.
+
+* Fixed: GPT-5.6 and Astra models now use OpenAI's Responses API, while older OpenAI models and OpenAI-compatible providers keep using Chat Completions. Follow-up messages no longer abort because of a stale send handler.
+* Improved: AI Chat sends a smaller tool and conversation context, loads specialist tool groups only when needed, bounds large tool results and histories, and reports cached input tokens correctly.
+* Fixed: settings pushed to EMCP Cloud are shared across the account so another connected site can pull them. Sync failures now explain whether the plan, connection, or missing cloud data caused the problem. Secrets, API keys, and connection credentials remain excluded.
+* Compatibility: Cloud sign-in accepts older server registration responses while using the stronger registration proof when supplied, allowing website and plugin updates to roll out independently.
+
+= 3.15.0 =
+
+Adds public page HTML inspection, Elementor CSS regeneration, and native WooCommerce Brands support, and improves Navigator labels and layout guidance.
+
+* Added: read-only public front-end HTML inspection with bounded chunks and same-origin redirect protection (#132). Returns server-rendered HTML; JavaScript is not executed.
+* Added: page or site-wide Elementor CSS/data regeneration (#136). Ships disabled by default; site-wide use requires administrator permission and confirmation.
+* Added: native WooCommerce brand list/get/create/update workflows (Pro), with dry runs, duplicate checks, validated logo attachments, and guidance for the active SEO plugin's term tools (#137).
+* Fixed: classic and atomic Navigator label persistence, with saved-value verification (#133).
+* Improved: layout tools warn when dimension values mix blank and specified sides, without changing the supplied values (#134).
+* Improved: grid discovery and creation explain Elementor's two-row default and the explicit single-row setting (#135).
+0 below $5 by default. Gemini models are not offered on Zen (use the Gemini provider), and Zen's free models are hidden because OpenCode limits them to its own client.
+* New: Works alongside Elementor's own MCP server (Elementor 4.3+). EMCP's Elementor tools refuse to write to a page another user has open with unsaved changes, tell an open editor when a page changed, and tell connected agents which server to use for which job. The admin bar item now reads EMCP.
+* Fixed: Themer dynamic images and links in Elementor. Binding the Featured Image, Site Logo or Author Avatar source to an Elementor image or background no longer crashes the page, and the Featured Image size setting now takes effect.
+* Fixed: A padding, margin, border radius or border width sent with some sides blank is no longer saved in a way that makes Elementor drop the whole rule; blank sides are filled from the saved value or the setting is left unchanged, and the warning says which (#151).
+* Fixed: The Brand Kits tab no longer disappears when Elementor is not the selected page builder; it follows its module switch, like Templates.
+* Fixed: The Skills tab now disappears from the sidebar and the Dashboard when the Agent Skills module is off.
+* Fixed: Restoring a full backup no longer brings back that backup's own "running" record, which showed in History as a stale 0-byte backup (Pro). Backups leave out EMCP's backup and job tables, and a restore keeps the site's own backup history.
+* Fixed: Bricks 2.4 compatibility. The Bricks integration can now be enabled on Bricks 2.4.x, verified natively on 2.4.1.
+* Fixed: 55 curated widget parameters used names Elementor does not recognise, so their values were ignored; all are corrected or removed, catalog defaults now use values Elementor accepts (progress bars show their percentage and code blocks their line numbers and copy button again), and the widget tools now warn about unrecognised settings. Re-send values set under the old names (#152).
+* Changed: EMCP Themer is off by default on new installs; turn it on from EMCP Tools > Modules. Sites that already use it keep it on.
+* New: Starter prompts in AI Chat (Pro). A new chat suggests six prompts above the message box, your most used one first and the rest shuffled from ones you have not tried: site tasks on the AI Chat page, page tasks in the editors.
+* New: Sandbox Plugin Export (Pro module, on by default). Package every active Sandbox widget, block and PHP snippet as a standalone plugin that keeps working after EMCP Tools is deactivated. Identities are preserved, the runtime the widgets call is bundled, API keys come from constants, and the export stays dormant while EMCP Tools is active.
+
+* New: A redesigned admin. Every screen was rebuilt in one frame with a grouped sidebar, a search palette (Ctrl or Cmd + K), notifications, a save bar and a recovery panel. The old screens and the admin-ajax handlers only they used are removed; no MCP tools were added or removed.
+* New: Dashboard with AI activity over 7, 14 or 30 days, the most used tools, recent changes with Undo, a health strip, and Needs your attention (server off, unrecorded changes, sandbox review, disabled tools, updates, Cloud, and on Pro backups).
+* New: Guided connection setup that waits for your client's first MCP call and confirms it.
+* New: History with sessions, diffs, search and filters, session undo and a retention setting, stored in its own table (migrated automatically).
+* Changed: Reconnect your AI clients after updating; a client that stays connected keeps the previous version and its changes are not recorded until it reconnects.
+* New: MCP Log screen with filters and CSV export.
+* New: Scheduled backups (Pro), daily or weekly through WP-Cron, with retention and a Continue option if WP-Cron stalls.
+* New: Redirects can match a query string; existing redirects behave as before.
+* New: Context sections and a site profile for what connected agents are told, with a preview.
+* Changed: Sandbox items created over MCP are always drafts; activate them on the Sandbox screens.
+* New: Custom skills (Pro). Write your own agent playbooks in a full editor under Skills > Custom skills; switched-on skills join the skills catalog beside the bundled ones.
+* New: Customize a prompt (builder, business name, colours, fonts, content) before copying it; on Pro, Use in AI Chat opens AI Chat in a new tab with the prompt filled in.
+* New: The Pro prompt library grows to 100 prompts across 20 categories, adding 50 complete-website prompts.
+* Changed: add-pro-widget is on by default on new installs (it registers only with Elementor Pro); existing sites keep their choice.
+* Changed: The Marketplace screen loads a slimmer listing, shows five cards per row and pages 20 at a time.
+
+= 3.17.1 =
+
+Patch release: three data-safety fixes for Elementor writes, a Cloud gateway reconnect fix, an OAuth discovery fix for sites running a second MCP plugin, and a community-contributed Visibility SEO integration.
+
+* Fixed: update-page-settings merges into the stored settings instead of replacing the whole object, so a one-key patch on the active kit no longer wipes custom colors, typography presets and site identity (#145).
+* Fixed: update-global-colors refuses the system color ids (primary, secondary, text, accent) instead of writing a shadow custom color, and reports which ids it wrote (#145).
+* Fixed: Dimension values (margin, padding, gap, border) are stored as strings so the Elementor editor's Layout panel shows the real value instead of 0 (#146).
+* Fixed: Third-party widgets Elementor cannot instantiate in the current context (FunnelKit Pro, CartFlows checkout forms) are no longer silently dropped when another element on the page is edited over MCP (#143).
+* Fixed: Reconnecting to EMCP Cloud re-issues or withdraws the gateway credential according to the gateway box, and a Re-issue gateway credential button covers a credential revoked or lost outside a reconnect (#148).
+* Fixed: OAuth discovery answers only the well-known paths scoped to EMCP's own MCP resource, so a second OAuth-capable MCP plugin on the same site (path-based issuer) can serve its own discovery document and connect without switching EMCP sign-in off.
+* New: Visibility SEO integration, free, two tools, read and write, over Visibility's per-post SEO metadata including robots flags, Open Graph fields and the Schema.org type override. Contributed by Fernando Tellado (#141, #149).
+
+= 3.17.0 =
+
+Adds independent page-builder integrations and Gutenberg block packs, expands Widget Builder data controls, bundles native authoring skills, and strengthens History recording and rollback.
+
+* New: Dedicated page-builder integrations. Bricks, Breakdance, Avada, Divi 5, Thrive Architect, Oxygen 6, Kirki, WPBakery, Beaver Builder and Visual Composer join the existing Elementor and BeBuilder workflows. Each has its own tools and sections. Availability follows the installed vendor version and tested scope; optional vendor features may remain read-only or unsupported.
+* New: Page Builders management screen. Choose one standalone builder integration while keeping Gutenberg available. Inactive builder tools stay out of discovery, and new write tools start disabled.
+* Improved: Independent Gutenberg block packs. Spectra, Kadence Blocks, GenerateBlocks, Blocksy Blocks and Otter Blocks have independent toggles and dedicated tools. Theme settings remain in Themes; Blocksy Companion extensions and Pro Content Blocks have separate plugin tools.
+* New: Otter Free and Pro support. Adds 19 tools for native block discovery and editing, local patterns, generated page styles and allowlisted feature settings. Verified with 45 registered blocks in Free and 63 with Pro. Static blocks retain native Gutenberg markup.
+* Improved: Oxygen integration coverage. Adds native library, template, component and design-system workflows, version-aware schemas, conditional data handling and recovery checks. The bundled skill and integration guide document tested write boundaries.
+* New: Widget Builder data controls. Queries can supply posts, products, terms, menus, site data, breadcrumbs, carts and remote JSON. Allowlisted shortcode providers support saved Elementor templates and form plugins. Live data keys have a dedicated Connection section and remain outside cloud settings sync.
+* Fixed: Widget control collisions. Reserved Elementor setting names are rejected so a custom control cannot accidentally hide a widget through entrance-animation settings. Structured control defaults and live registry synchronization improve generated widget behavior.
+* Improved: Bundled authoring skills. Builder-specific guidance is available in runtime discovery and both downloadable skill formats, with native editor contracts, test findings and upstream attribution.
+* Fixed: Templates module visibility. The Templates page follows its module toggle even when another builder is selected. The current library remains Elementor-specific. The general Elementor installation notice no longer appears merely because Elementor is absent.
+* Maintenance: Shared agent guidance. AGENTS.md is the single source of project guidance; CLAUDE.md imports it. Native integration probes, MCP smoke fixtures and regression tests accompany the implementation.
+
+* Fixed: create-page records one creation event and returns its change_id. Undo removes the created page, including its initial Elementor content.
+* New: upload-media records a creation event and returns its change_id. Undo removes the attachment and verifies deletion of recorded WordPress-managed files, including generated sizes on Windows.
+* Fixed: Page settings and custom CSS changes record exact prior metadata for undo, preserve absence and escaped values, and invalidate Elementor caches. Identical CSS saves do not add redundant entries.
+* Improved: Conflict guards protect later creation edits, metadata, taxonomy assignments, user fields, ACF values, and changed upload bytes. Unrelated post-field changes remain intact.
+* Fixed: Failed restoration or History persistence no longer reports ordinary rollback success. Missing backups and occupied IDs are refused, and failed ledger cleanup retains its snapshots.
+* Changed: Incomplete or unverified database, legacy post, and generic attachment-deletion snapshots refuse automatic undo even with force. History explains unavailability and retains snapshots for inspection. Previously omitted actions are not reconstructed; rollback coverage remains operation-specific.
+
+= 3.16.1 =
+
+Fixes detected server URLs on plain-permalink WordPress sites in both Free and Pro.
+
+* Fixed: Remove the trailing index.php from the detected Server URL while preserving subdirectory paths. Corrects the default displayed on the Connection tab and the site URL embedded in generated .mcpb bundles (#142).
+
+= 3.16.0 =
+
+Adds structured imports, uploaded package installs, broader ACF coverage, FunnelKit reads, GSAP integration, and correct Hello Elementor Themer rendering.
+
+* New: GSAP Integration is an opt-in Pro module with locally bundled GSAP 3.15.0 core and all 24 distributed plugins, stable WordPress handles, per-plugin and context controls, dependency resolution, MCP read/write dispatchers, and a dedicated Agent Skill included in both downloadable skill formats.
+* New: FunnelKit Funnel Builder read support (Pro) adds five operations for funnels and ordered steps, decoded funnel-page configuration, checkout products with effective prices, and checkout fields in saved order (#140). Automations, contacts, statistics, and writes remain outside 3.16.0.
+* New: ACF and WooCommerce accept bounded structured imports extracted by an agent from PDF, spreadsheet, CSV, DOCX, OCR, or other source documents; WordPress validates and writes the structured payload without parsing the source file server-side.
+* New: plugin and theme installers accept confirmed, SHA-256-bound ZIP attachments uploaded through the media tool, with archive, compatibility, traversal, symlink, overwrite, and protected-destination guards.
+* Improved: ACF Free and Pro coverage is runtime-discoverable and type-aware, including nested Pro values, clone sources, relationship updates, field-group settings, and full validation before mutation.
+* Improved: Change History now shows 20 entries per page with result counts and previous, next, and numbered controls; filters and row actions retain the current History page.
+* Fixed: EMCP Themer headers and footers now replace Hello Elementor 3.x native parts through Hello's real render-time filter, without duplicate output or interference with settings checks and Elementor Pro precedence (#138).
+
+= 3.15.2 =
+
+Restores the intended formatting of the 3.15.1 release notes in plugin changelog views.
+
+* Fixed: the 3.15.1 changelog now keeps the required spacing between its heading, summary, and bullet list so WordPress-compatible readme renderers display it correctly.
+
+= 3.15.1 =
+
+Fixes AI Chat for the latest OpenAI models, reduces token usage, and restores cross-site settings sync.
+
+* Fixed: GPT-5.6 and Astra models now use OpenAI's Responses API, while older OpenAI models and OpenAI-compatible providers keep using Chat Completions. Follow-up messages no longer abort because of a stale send handler.
+* Improved: AI Chat sends a smaller tool and conversation context, loads specialist tool groups only when needed, bounds large tool results and histories, and reports cached input tokens correctly.
+* Fixed: settings pushed to EMCP Cloud are shared across the account so another connected site can pull them. Sync failures now explain whether the plan, connection, or missing cloud data caused the problem. Secrets, API keys, and connection credentials remain excluded.
+* Compatibility: Cloud sign-in accepts older server registration responses while using the stronger registration proof when supplied, allowing website and plugin updates to roll out independently.
+
+= 3.15.0 =
+
+Adds public page HTML inspection, Elementor CSS regeneration, and native WooCommerce Brands support, and improves Navigator labels and layout guidance.
+
+* Added: read-only public front-end HTML inspection with bounded chunks and same-origin redirect protection (#132). Returns server-rendered HTML; JavaScript is not executed.
+* Added: page or site-wide Elementor CSS/data regeneration (#136). Ships disabled by default; site-wide use requires administrator permission and confirmation.
+* Added: native WooCommerce brand list/get/create/update workflows (Pro), with dry runs, duplicate checks, validated logo attachments, and guidance for the active SEO plugin's term tools (#137).
+* Fixed: classic and atomic Navigator label persistence, with saved-value verification (#133).
+* Improved: layout tools warn when dimension values mix blank and specified sides, without changing the supplied values (#134).
+* Improved: grid discovery and creation explain Elementor's two-row default and the explicit single-row setting (#135).
+
 
 = 3.14.2 =
 Fixes intermittent MCP connection failures affecting OAuth and Application Password clients, especially on managed hosts and during concurrent startup.
@@ -600,7 +1237,7 @@ The first major release of the rebranded EMCP Tools, a step beyond Elementor int
 
 = 2.0.0 =
 * ⚠️ PRO USERS, ACTION NEEDED: Because the plugin folder/slug changed (elementor-mcp -> emcp-tools), the new install is a separate plugin to WordPress, so your Pro license does NOT carry over automatically. After deleting the old plugin and activating "EMCP Tools", you will likely need to re-activate your license and complete the Freemius opt-in/connection again. Your license stays valid. This only re-links it to the renamed plugin. Free users have nothing extra to do.
-* Changed: The plugin was renamed from "emcp-tools" to "emcp-tools" as it grows beyond Elementor. The folder, main file, text domain, and all internal PHP identifiers were rebranded. In the Plugins list it now shows as "EMCP Tools" (the old one stays "MCP Tools for Elementor", so it's clear which to remove). Your AI clients keep working unchanged: the MCP tool names and server (emcp-tools/..., emcp-tools-server) are intentionally unchanged, so no connection config or skill needs editing.
+* Changed: The plugin was renamed from "emcp-tools" to "emcp-tools" as it grows beyond Elementor. The folder, main file, text domain, and all internal PHP identifiers were rebranded. In the Plugins list it now shows as "EMCP Tools" (the old one keeps its previous name, so it's clear which to remove). Your AI clients keep working unchanged: the MCP tool names and server (emcp-tools/..., emcp-tools-server) are intentionally unchanged, so no connection config or skill needs editing.
 * New: Safe automatic migration. If the old "emcp-tools" plugin is still active, EMCP Tools pauses and shows a notice to deactivate and delete it; your settings and banner dismissals are carried over to the new keys (captured before the old plugin's uninstall can wipe them).
 * Note: Install emcp-tools as a new plugin, then remove the old elementor-mcp one when prompted. All PHP symbols are uniquely re-prefixed so the two coexist during the switch without fatal errors.
 
@@ -719,7 +1356,7 @@ The first major release of the rebranded EMCP Tools, a step beyond Elementor int
 * Improved: Element factory with enhanced container support.
 
 = 1.3.2 =
-* Renamed plugin to "MCP Tools for Elementor" to comply with WordPress.org trademark guidelines.
+* Renamed the plugin to comply with WordPress.org trademark guidelines.
 * Updated admin menu label to "EMCP Tools" for brevity.
 * Fixed WPCS issues: prefixed all global variables in view templates, escaped integer output, added missing translators comments.
 * Updated "Tested up to" to WordPress 6.9.

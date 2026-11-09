@@ -388,7 +388,7 @@ class EMCP_Tools_Query_Abilities {
 		$controls = $element_type->get_controls();
 		$schema   = array(
 			'type'       => 'object',
-			'description' => 'Settings for the Container element.',
+			'description' => 'Settings for the Container element. Grid defaults to 2 rows; for a single row set grid_rows_grid: {"unit":"fr","size":1}. Dimension controls such as margin/padding should supply all four sides: one blank side can suppress the entire CSS rule.',
 			'properties' => array(),
 		);
 

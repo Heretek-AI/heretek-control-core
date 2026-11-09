@@ -1,0 +1,314 @@
+import { render, screen, within, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import apiFetch from '@wordpress/api-fetch';
+import { AppProviders } from '@emcp/ui';
+import { PromptsScreen } from './PromptsScreen';
+
+jest.mock( '@wordpress/api-fetch', () => jest.fn() );
+
+const item = ( slug, category = 'food-dining', label = 'Food & Dining' ) => ( {
+	slug,
+	category,
+	categoryLabel: label,
+	title: slug[ 0 ].toUpperCase() + slug.slice( 1 ),
+	description: '',
+	content: 'Design and build a complete landing page for ' + slug + '.',
+	tier: 'pro',
+} );
+
+const data = {
+	items: [
+		item( 'bakery' ),
+		item( 'pizza' ),
+		item( 'groomer', 'pets', 'Pets' ),
+	],
+	total: 3,
+	page: 1,
+	pages: 2,
+	categories: [
+		{ slug: 'food-dining', label: 'Food & Dining', count: 2 },
+		{ slug: 'pets', label: 'Pets', count: 1 },
+	],
+	source: 'pro',
+	syncedAt: Math.floor( Date.now() / 1000 ) - 3600,
+	error: '',
+	licensed: true,
+	noticeDismissed: false,
+	v1Url: '/wp-admin/admin-post.php?action=emcp_tools_download_prompts_v1',
+	aiChatUrl: '/wp-admin/admin.php?page=emcp-tools-ai-chat',
+	upgradeUrl: 'https://emcptools.com/pricing',
+};
+
+function mount(
+	d = data,
+	url = '/wp-admin/admin.php?page=emcp-tools-prompts'
+) {
+	window.history.replaceState( {}, '', url );
+	return render(
+		<AppProviders>
+			<PromptsScreen data={ d } />
+		</AppProviders>
+	);
+}
+
+const searchPaths = () =>
+	apiFetch.mock.calls
+		.map( ( [ o ] ) => o.path )
+		.filter( ( p ) => /[?&]search=[^&]/.test( p ) );
+
+describe( 'PromptsScreen', () => {
+	beforeEach( () => {
+		apiFetch.mockReset();
+		apiFetch.mockResolvedValue( {
+			...data,
+			items: [ item( 'groomer', 'pets', 'Pets' ) ],
+			total: 1,
+			pages: 1,
+		} );
+		Object.assign( navigator, {
+			clipboard: { writeText: jest.fn( () => Promise.resolve() ) },
+		} );
+		Object.defineProperty( window, 'isSecureContext', {
+			value: true,
+			configurable: true,
+		} );
+		window.sessionStorage.clear();
+	} );
+
+	it( 'shows the library summary, the notice and the category chips with counts', () => {
+		mount();
+		expect(
+			screen.getByText( /3 prompts across 2 categories/ )
+		).toBeInTheDocument();
+		expect(
+			screen.getByText( 'Prompts have been rewritten' )
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole( 'button', { name: /Pets\s*1/ } )
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole( 'link', { name: /Download v1 prompts/ } )
+		).toHaveAttribute( 'href', data.v1Url );
+	} );
+
+	it( 'gives the cards a section heading so headings do not skip a level', () => {
+		mount();
+		expect(
+			screen.getByRole( 'heading', { level: 2, name: 'Prompt library' } )
+		).toBeInTheDocument();
+	} );
+
+	it( 'filters by category through the server and keeps it in the URL', async () => {
+		mount();
+		await userEvent.click(
+			screen.getByRole( 'button', { name: /Pets\s*1/ } )
+		);
+		expect( apiFetch ).toHaveBeenLastCalledWith(
+			expect.objectContaining( {
+				path: expect.stringContaining(
+					'/emcp-tools/v1/admin/prompts?'
+				),
+			} )
+		);
+		expect( apiFetch.mock.calls.at( -1 )[ 0 ].path ).toContain(
+			'category=pets'
+		);
+		expect( window.location.search ).toContain( 'category=pets' );
+		expect(
+			await screen.findByRole( 'heading', { name: 'Groomer' } )
+		).toBeInTheDocument();
+	} );
+
+	it( 'copies the full prompt, says Copied and records the copy', async () => {
+		mount();
+		const card = screen
+			.getByRole( 'heading', { name: 'Bakery' } )
+			.closest( '.eui-prompt' );
+		await userEvent.click(
+			within( card ).getByRole( 'button', { name: 'Copy prompt' } )
+		);
+		expect( navigator.clipboard.writeText ).toHaveBeenCalledWith(
+			data.items[ 0 ].content
+		);
+		expect(
+			within( card ).getByRole( 'button', { name: 'Copied' } )
+		).toBeInTheDocument();
+		expect( apiFetch ).toHaveBeenCalledWith(
+			expect.objectContaining( {
+				path: '/emcp-tools/v1/admin/prompts/food-dining/bakery/copied',
+				method: 'POST',
+			} )
+		);
+	} );
+
+	it( 'opens AI Chat in a new tab and hands the prompt over by id', async () => {
+		mount();
+		const card = screen
+			.getByRole( 'heading', { name: 'Pizza' } )
+			.closest( '.eui-prompt' );
+		const link = within( card ).getByRole( 'link', {
+			name: 'Use in AI Chat (opens in a new tab)',
+		} );
+		expect( link ).toHaveAttribute( 'target', '_blank' );
+		expect( link.getAttribute( 'rel' ) ).toContain( 'noopener' );
+		const url = new URL( link.href );
+		expect( url.searchParams.get( 'page' ) ).toBe( 'emcp-tools-ai-chat' );
+		const id = url.searchParams.get( 'handoff' );
+		expect( id ).toMatch( /^[a-z0-9]{6,40}$/ );
+		link.addEventListener( 'click', ( e ) => e.preventDefault() );
+		await userEvent.click( link );
+		// localStorage, because a new tab does not share sessionStorage.
+		const handed = JSON.parse(
+			window.localStorage.getItem( 'emcp.aiChat.handoff.' + id )
+		);
+		expect( handed.text ).toBe( data.items[ 1 ].content );
+		// Stamped, so AI Chat ignores a hand-off left over from long ago.
+		expect( Math.abs( Date.now() - handed.at ) ).toBeLessThan( 5000 );
+		window.localStorage.clear();
+	} );
+
+	it( 'a middle click hands the prompt over too', () => {
+		mount();
+		const link = screen.getAllByRole( 'link', {
+			name: /^Use in AI Chat/,
+		} )[ 0 ];
+		const id = new URL( link.href ).searchParams.get( 'handoff' );
+		link.dispatchEvent(
+			new window.MouseEvent( 'auxclick', { bubbles: true, button: 1 } )
+		);
+		expect(
+			window.localStorage.getItem( 'emcp.aiChat.handoff.' + id )
+		).not.toBeNull();
+		window.localStorage.clear();
+	} );
+
+	it( 'hides Use in AI Chat when AI Chat is off', () => {
+		mount( { ...data, aiChatUrl: '' } );
+		expect(
+			screen.queryByRole( 'link', { name: /^Use in AI Chat/ } )
+		).not.toBeInTheDocument();
+	} );
+
+	it( 'Customize opens the customizer for that prompt', async () => {
+		mount();
+		const card = screen
+			.getByRole( 'heading', { name: 'Bakery' } )
+			.closest( '.eui-prompt' );
+		await userEvent.click(
+			within( card ).getByRole( 'button', { name: 'Customize' } )
+		);
+		expect(
+			await screen.findByRole( 'dialog', { name: 'Customize Bakery' } )
+		).toBeInTheDocument();
+	} );
+
+	it( 'previews the whole prompt in a drawer', async () => {
+		mount();
+		const card = screen
+			.getByRole( 'heading', { name: 'Bakery' } )
+			.closest( '.eui-prompt' );
+		await userEvent.click(
+			within( card ).getByRole( 'button', { name: 'Preview Bakery' } )
+		);
+		const drawer = await screen.findByRole( 'dialog', { name: 'Bakery' } );
+		expect(
+			within( drawer ).getByText( data.items[ 0 ].content )
+		).toBeInTheDocument();
+	} );
+
+	it( 'dismisses the notice for this user', async () => {
+		apiFetch.mockResolvedValueOnce( { dismissed: true } );
+		mount();
+		await userEvent.click(
+			screen.getByRole( 'button', { name: 'Dismiss' } )
+		);
+		expect( apiFetch ).toHaveBeenCalledWith(
+			expect.objectContaining( {
+				path: '/emcp-tools/v1/admin/prompts/notice/dismiss',
+				method: 'POST',
+			} )
+		);
+		expect(
+			screen.queryByText( 'Prompts have been rewritten' )
+		).not.toBeInTheDocument();
+	} );
+
+	it( 'syncs the library', async () => {
+		apiFetch.mockResolvedValueOnce( {
+			...data,
+			message: 'Synced 3 prompts across 2 categories.',
+		} );
+		mount();
+		await userEvent.click(
+			screen.getByRole( 'button', { name: 'Sync library' } )
+		);
+		expect( apiFetch ).toHaveBeenCalledWith(
+			expect.objectContaining( {
+				path: '/emcp-tools/v1/admin/prompts/sync',
+				method: 'POST',
+			} )
+		);
+		expect(
+			await screen.findByText( 'Synced 3 prompts across 2 categories.' )
+		).toBeInTheDocument();
+	} );
+
+	it( 'free builds show the samples and the upgrade call to action, no sync', () => {
+		mount( {
+			...data,
+			source: 'free',
+			licensed: false,
+			v1Url: '',
+			aiChatUrl: '',
+			items: [ { ...item( 'car-wash' ), tier: 'free' } ],
+			total: 1,
+			pages: 1,
+			categories: [ { slug: 'lifestyle', label: 'Lifestyle', count: 1 } ],
+		} );
+		expect(
+			screen.queryByRole( 'button', { name: 'Sync library' } )
+		).not.toBeInTheDocument();
+		const banner = screen.getByRole( 'region', {
+			name: 'Get 100+ premium prompts with EMCP Pro',
+		} );
+		expect( banner ).toHaveTextContent( 'You are using 1 free sample' );
+		expect(
+			within( banner ).getByRole( 'link', { name: /Upgrade to Pro/ } )
+		).toHaveAttribute( 'href', data.upgradeUrl );
+	} );
+
+	it( 'licensed builds show no upgrade banner', () => {
+		mount( data );
+		expect(
+			screen.queryByRole( 'region', {
+				name: 'Get 100+ premium prompts with EMCP Pro',
+			} )
+		).not.toBeInTheDocument();
+	} );
+
+	it( 'a failed Pro sync shows the error with the samples', () => {
+		mount( {
+			...data,
+			source: 'free',
+			error: 'Offline',
+			items: [ { ...item( 'car-wash' ), tier: 'free' } ],
+			total: 1,
+			pages: 1,
+		} );
+		expect( screen.getByText( /Offline/ ) ).toBeInTheDocument();
+		expect(
+			screen.getByRole( 'heading', { name: 'Car-wash' } )
+		).toBeInTheDocument();
+	} );
+
+	it( 'debounces search: typing a word sends one request', async () => {
+		apiFetch.mockResolvedValue( data );
+		mount();
+		await userEvent.type(
+			screen.getByRole( 'searchbox', { name: 'Search prompts' } ),
+			'abc'
+		);
+		await waitFor( () => expect( searchPaths() ).toHaveLength( 1 ) );
+		expect( searchPaths()[ 0 ] ).toContain( 'search=abc' );
+	} );
+} );

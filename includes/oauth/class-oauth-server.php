@@ -56,6 +56,12 @@ class EMCP_Tools_OAuth_Server {
 		}
 
 		if ( ! self::is_enabled() ) {
+			// Subdirectory multisite: the main site still answers path-inserted
+			// discovery for subsites that have OAuth on (maybe_serve() serves
+			// only that case while this site's own OAuth is off).
+			if ( is_multisite() && ! is_subdomain_install() ) {
+				add_action( 'parse_request', array( 'EMCP_Tools_OAuth_Metadata', 'maybe_serve' ), 0 );
+			}
 			return;
 		}
 		// Discovery documents at the site root.
@@ -120,7 +126,7 @@ class EMCP_Tools_OAuth_Server {
 		if ( 0 === strpos( (string) home_url(), 'https://' ) ) {
 			return true;
 		}
-		$host = isset( $_SERVER['HTTP_HOST'] ) ? strtolower( (string) wp_unslash( $_SERVER['HTTP_HOST'] ) ) : '';
+		$host = strtolower( (string) wp_parse_url( home_url(), PHP_URL_HOST ) );
 		return self::is_local_host( $host );
 	}
 

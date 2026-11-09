@@ -302,6 +302,7 @@ class EMCP_Tools_Widget_Store {
 		}
 
 		self::rebuild_manifest();
+		self::sync_live_registry( (int) $post_id );
 
 		return self::summary( (int) $post_id );
 	}
@@ -475,6 +476,51 @@ class EMCP_Tools_Widget_Store {
 	}
 
 	/**
+	 * Registers a newly activated widget into Elementor's LIVE widget registry.
+	 *
+	 * The loader registers from the manifest on `elementor/widgets/register`,
+	 * which fires once per process. A long-lived process (the WP-CLI MCP stdio
+	 * server, a persistent worker) that already built the registry would not see
+	 * a widget created afterwards, so `add-free-widget` in the same session
+	 * reported "Widget type not found" until the process restarted. No-op when
+	 * the registry has not been built yet (the loader picks the manifest up
+	 * normally) or when the type is already registered.
+	 *
+	 * @since 3.17.1
+	 *
+	 * @param int $post_id Widget post ID.
+	 */
+	private static function sync_live_registry( int $post_id ): void {
+		if ( ! did_action( 'elementor/widgets/register' ) || ! class_exists( '\Elementor\Plugin' ) ) {
+			return;
+		}
+		if ( 'publish' !== get_post_status( $post_id ) ) {
+			return;
+		}
+		$class_name  = (string) get_post_meta( $post_id, self::META_CLASS_NAME, true );
+		$widget_name = (string) get_post_meta( $post_id, self::META_WIDGET_NAME, true );
+		if ( '' === $class_name || '' === $widget_name ) {
+			return;
+		}
+		$manager = \Elementor\Plugin::$instance->widgets_manager ?? null;
+		if ( ! $manager || ! method_exists( $manager, 'register' ) || $manager->get_widget_types( $widget_name ) ) {
+			return;
+		}
+		$path = self::php_path( $post_id );
+		if ( ! class_exists( $class_name ) && is_file( $path ) ) {
+			include_once $path;
+		}
+		if ( ! class_exists( $class_name ) ) {
+			return;
+		}
+		try {
+			$manager->register( new $class_name() );
+		} catch ( \Throwable $e ) {
+			self::mark_error( $post_id, $e->getMessage() );
+		}
+	}
+
+	/**
 	 * If an active widget fails the runtime check, demote it to draft and record
 	 * the error so it never reaches the manifest (and never breaks the editor).
 	 *
@@ -540,6 +586,7 @@ class EMCP_Tools_Widget_Store {
 		);
 
 		self::rebuild_manifest();
+		self::sync_live_registry( $post_id );
 
 		return self::summary( $post_id );
 	}

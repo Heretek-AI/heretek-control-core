@@ -22,9 +22,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class EMCP_Tools_Bulk_Optimizer {
 
-	const ACTION_BATCH   = 'emcp_tools_optimize_batch';
 	const ACTION_RESTORE = 'emcp_tools_optimize_restore';
-	const NONCE          = 'emcp_tools_modules';
 	const OPTION_CURSOR  = 'emcp_tools_module_image_optimization_bulk_cursor';
 
 	/** @var array Module settings. */
@@ -35,12 +33,6 @@ class EMCP_Tools_Bulk_Optimizer {
 	 */
 	public function __construct( array $settings ) {
 		$this->settings = $settings;
-	}
-
-	/** Wire the ajax handlers. */
-	public function register(): void {
-		add_action( 'wp_ajax_' . self::ACTION_BATCH, array( $this, 'ajax_batch' ) );
-		add_action( 'wp_ajax_' . self::ACTION_RESTORE, array( $this, 'ajax_restore' ) );
 	}
 
 	/**
@@ -77,13 +69,13 @@ class EMCP_Tools_Bulk_Optimizer {
 		);
 	}
 
-	/** admin-ajax: process one batch. */
-	public function ajax_batch(): void {
-		check_ajax_referer( self::NONCE, 'nonce' );
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'emcp-tools' ) ), 403 );
-		}
-
+	/**
+	 * Optimize the next batch of the library (shared by admin-ajax and REST).
+	 *
+	 * @param int $size Requested batch size (clamped 1-50).
+	 * @return array{total:int,processed:int,remaining:int,percent:int,done:bool}
+	 */
+	public function run_batch( int $size ): array {
 		$ids = get_posts(
 			array(
 				'post_type'      => 'attachment',
@@ -96,7 +88,7 @@ class EMCP_Tools_Bulk_Optimizer {
 			)
 		);
 		$total = count( $ids );
-		$batch = self::batch_size( isset( $_POST['batch'] ) ? (int) $_POST['batch'] : 0 );
+		$batch = self::batch_size( $size );
 		$done  = (int) get_option( self::OPTION_CURSOR, 0 );
 
 		$slice     = array_slice( $ids, $done, $batch );
@@ -120,16 +112,18 @@ class EMCP_Tools_Bulk_Optimizer {
 		$progress = self::progress( $total, $done );
 		if ( $progress['done'] ) {
 			update_option( self::OPTION_CURSOR, 0 );
+			// Pages Elementor cached before the run still point at the JPEGs.
+			EMCP_Tools_Image_Optimization_Module::flush_elementor_cache();
 		}
-		wp_send_json_success( $progress );
+		return $progress;
 	}
 
-	/** admin-ajax: restore originals from backups. */
-	public function ajax_restore(): void {
-		check_ajax_referer( self::NONCE, 'nonce' );
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_send_json_error( array( 'message' => __( 'Permission denied.', 'emcp-tools' ) ), 403 );
-		}
+	/**
+	 * Copy the backed-up originals back and delete their WebP siblings.
+	 *
+	 * @return array{restored:int}
+	 */
+	public function restore(): array {
 		$upload   = wp_upload_dir();
 		$basedir  = rtrim( $upload['basedir'] ?? '', '/\\' );
 		$origin   = $basedir . '/emcp-originals';
@@ -150,7 +144,9 @@ class EMCP_Tools_Bulk_Optimizer {
 			}
 		}
 		update_option( self::OPTION_CURSOR, 0 );
-		wp_send_json_success( array( 'restored' => $restored ) );
+		// Cached pages may still point at the WebP copies just deleted.
+		EMCP_Tools_Image_Optimization_Module::flush_elementor_cache();
+		return array( 'restored' => $restored );
 	}
 
 	/**

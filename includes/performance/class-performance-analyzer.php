@@ -107,8 +107,12 @@ class EMCP_Tools_Performance_Analyzer {
 	 * @return bool
 	 */
 	public function validate_same_host( string $url, string $site_host ): bool {
-		$host = (string) wp_parse_url( $url, PHP_URL_HOST );
-		return '' !== $host && strtolower( $host ) === strtolower( $site_host );
+		$home = home_url( '/' );
+		if ( strtolower( (string) wp_parse_url( $home, PHP_URL_HOST ) ) !== strtolower( $site_host ) ) {
+			return false;
+		}
+		$fetcher = new EMCP_Tools_Frontend_Page_Fetcher();
+		return $fetcher->same_origin( $url, $home );
 	}
 
 	/**

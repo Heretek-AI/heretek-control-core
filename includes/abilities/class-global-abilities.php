@@ -21,6 +21,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 class EMCP_Tools_Global_Abilities {
 
 	/**
+	 * The four `system_colors` slot ids. Writing them into `custom_colors`
+	 * shadows the system variable instead of changing it (#145).
+	 */
+	const SYSTEM_COLOR_IDS = array( 'primary', 'secondary', 'text', 'accent' );
+
+	/**
 	 * @var EMCP_Tools_Data
 	 */
 	private $data;
@@ -80,7 +86,7 @@ class EMCP_Tools_Global_Abilities {
 			'emcp-tools/update-global-colors',
 			array(
 				'label'               => __( 'Update Global Colors', 'emcp-tools' ),
-				'description'         => __( 'Updates the site-wide color palette in the Elementor kit. Provide an array of color objects with id, title, and color (hex).', 'emcp-tools' ),
+				'description'         => __( 'Adds or updates entries in the Elementor kit CUSTOM color palette (settings.custom_colors), matched by _id. Provide an array of color objects with _id, title, and color (hex). The four system slots (primary, secondary, text, accent) live in system_colors and are refused here; use replace-system-colors (Pro) or the Elementor Site Settings UI for those.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_update_global_colors' ),
 				'permission_callback' => array( $this, 'check_manage_permission' ),
@@ -95,7 +101,7 @@ class EMCP_Tools_Global_Abilities {
 								'properties' => array(
 									'_id'   => array(
 										'type'        => 'string',
-										'description' => __( 'Unique color ID (e.g. "primary").', 'emcp-tools' ),
+										'description' => __( 'Unique custom color ID (e.g. "brand"). primary, secondary, text and accent are reserved system slots and are refused.', 'emcp-tools' ),
 									),
 									'title' => array(
 										'type'        => 'string',
@@ -182,6 +188,29 @@ class EMCP_Tools_Global_Abilities {
 			return new \WP_Error( 'kit_not_found', __( 'Active Elementor kit not found.', 'emcp-tools' ) );
 		}
 
+		// The four system slots live in `system_colors`; upserting one of their
+		// ids into `custom_colors` creates a shadow entry that collides with the
+		// system CSS variable and never changes the real color (#145). Refuse the
+		// whole call rather than write the rest and report success.
+		$reserved = array();
+		foreach ( $colors as $color ) {
+			$id = sanitize_text_field( is_array( $color ) ? ( $color['_id'] ?? '' ) : '' );
+			if ( in_array( $id, self::SYSTEM_COLOR_IDS, true ) ) {
+				$reserved[] = $id;
+			}
+		}
+		if ( $reserved ) {
+			return new \WP_Error(
+				'reserved_color_id',
+				sprintf(
+					/* translators: %s: comma-separated list of reserved ids */
+					__( 'These ids are Elementor system color slots and cannot be written as custom colors: %s. Use replace-system-colors (Pro) or Elementor Site Settings to change system colors.', 'emcp-tools' ),
+					implode( ', ', $reserved )
+				),
+				array( 'reserved' => array_values( array_unique( $reserved ) ) )
+			);
+		}
+
 		// Get current kit settings.
 		$kit_settings = $kit->get_settings();
 
@@ -195,11 +224,13 @@ class EMCP_Tools_Global_Abilities {
 			}
 		}
 
+		$written = array();
 		foreach ( $colors as $color ) {
 			$color_id = sanitize_text_field( $color['_id'] ?? '' );
 			if ( empty( $color_id ) ) {
 				continue;
 			}
+			$written[] = $color_id;
 
 			$color_entry = array(
 				'_id'   => $color_id,
@@ -218,7 +249,11 @@ class EMCP_Tools_Global_Abilities {
 		$kit->update_settings( array( 'custom_colors' => $existing_colors ) );
 		$this->record_kit_change( $emcp_kit_snap, 'Updated global colors' );
 
-		return array( 'success' => true );
+		return array(
+			'success' => true,
+			'target'  => 'custom_colors',
+			'written' => $written,
+		);
 	}
 
 	// -------------------------------------------------------------------------

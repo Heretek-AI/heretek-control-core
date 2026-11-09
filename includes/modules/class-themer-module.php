@@ -31,15 +31,30 @@ class EMCP_Tools_Themer_Module extends EMCP_Tools_Module {
 	}
 
 	public function description(): string {
-		return __( 'Build your site\'s header, footer, single, archive, search & 404 layouts with any page builder, and control where each applies.', 'emcp-tools' );
+		return __( 'Build your site\'s header, footer, single, archive, search & 404 layouts and Loop Items (post cards for the Loop Grid and Loop Carousel) with any page builder, and control where each applies.', 'emcp-tools' );
 	}
 
 	public function tier(): string {
 		return 'free';
 	}
 
+	/** Modules screen group. */
+	public function group(): string {
+		return 'content';
+	}
+
+	/** Modules screen icon. */
+	public function icon(): string {
+		return 'layout-template';
+	}
+
+	/**
+	 * Off on new installs: an admin turns Themer on from the Modules tab. The
+	 * registry seeds each module once, so a site that already has Themer on
+	 * keeps it.
+	 */
 	public function default_active(): bool {
-		return true;
+		return false;
 	}
 
 	/** The native CPT screen (its own dashboard menu) is the config surface. */
@@ -82,6 +97,22 @@ class EMCP_Tools_Themer_Module extends EMCP_Tools_Module {
 		}
 
 		EMCP_Tools_Themer_Index::register_hooks();
+
+		// Core post blocks inside a Loop Item read the card's post from here.
+		if ( class_exists( 'EMCP_Tools_Themer_Loop_Context' ) ) {
+			EMCP_Tools_Themer_Loop_Context::init();
+		}
+
+		if ( class_exists( 'EMCP_Tools_Themer_Loop_Assets' ) ) {
+			EMCP_Tools_Themer_Loop_Assets::init();
+		}
+		if ( class_exists( 'EMCP_Tools_Themer_Loop_REST' ) ) {
+			EMCP_Tools_Themer_Loop_REST::init();
+		}
+		// The option lists both loop builders offer, memoised per request.
+		if ( class_exists( 'EMCP_Tools_Themer_Loop_Options' ) ) {
+			EMCP_Tools_Themer_Loop_Options::init();
+		}
 
 		// One-time heal: a prior build could leave the condition index empty (the
 		// rebuild raced the metabox meta writes), so existing templates silently

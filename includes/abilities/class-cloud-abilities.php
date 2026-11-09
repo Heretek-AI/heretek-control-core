@@ -20,11 +20,14 @@ class EMCP_Tools_Cloud_Abilities {
 	 */
 	public function get_ability_names(): array {
 		return array(
+			'emcp-tools/cloud-safe-updates',
 			'emcp-tools/cloud-status',
 			'emcp-tools/cloud-backup',
 			'emcp-tools/cloud-list',
 			'emcp-tools/cloud-pull',
 			'emcp-tools/cloud-config-sync',
+			'emcp-tools/cloud-config-inspect',
+			'emcp-tools/cloud-config-deploy',
 			'emcp-tools/cloud-marketplace-list',
 			'emcp-tools/cloud-marketplace-install',
 		);
@@ -41,6 +44,40 @@ class EMCP_Tools_Cloud_Abilities {
 	 * @return void
 	 */
 	public function register(): void {
+		emcp_tools_register_ability( 'emcp-tools/cloud-safe-updates', array(
+			'label' => __( 'Cloud safe updates', 'emcp-tools' ),
+			'description' => __( 'Inspect available updates or prepare an explicitly approved maintenance and recovery job. Never accepts arbitrary download URLs.', 'emcp-tools' ),
+			'category' => 'emcp-tools', 'execute_callback' => array( $this, 'execute_safe_updates' ),
+			'permission_callback' => array( $this, 'check_permission' ),
+			'input_schema' => array( 'type' => 'object', 'required' => array( 'action' ), 'additionalProperties' => false, 'properties' => array(
+				'action' => array( 'type' => 'string', 'enum' => array( 'inspect', 'prepare' ) ),
+				'job' => array( 'type' => array( 'string', 'null' ) ), 'token' => array( 'type' => array( 'string', 'null' ) ),
+				'site_uuid' => array( 'type' => array( 'string', 'null' ) ), 'fingerprint' => array( 'type' => array( 'string', 'null' ) ),
+				'groups' => array( 'type' => array( 'array', 'null' ), 'items' => array( 'type' => 'array', 'items' => array( 'type' => 'object' ) ) ),
+				'paths' => array( 'type' => array( 'array', 'null' ), 'items' => array( 'type' => 'string' ) ), 'maintenance_accepted' => array( 'type' => 'boolean' ),
+			) ), 'output_schema' => array( 'type' => 'object' ),
+			'meta' => array( 'annotations' => array( 'readonly' => false, 'destructive' => true ), 'show_in_rest' => true ),
+		) );
+		emcp_tools_register_ability( 'emcp-tools/cloud-config-deploy', array(
+			'label' => __( 'Deploy managed Cloud settings', 'emcp-tools' ),
+			'description' => __( 'Apply an explicitly approved managed revision with a current fingerprint, inspect its durable receipt, or restore its before-image if changed keys still match. Cannot disable the Cloud recovery channel.', 'emcp-tools' ),
+			'category' => 'emcp-tools', 'execute_callback' => array( $this, 'execute_config_deploy' ),
+			'permission_callback' => array( $this, 'check_permission' ),
+			'input_schema' => array('type'=>'object','required'=>array('action','operation_id','site_uuid'),'additionalProperties'=>false,'properties'=>array(
+				'action'=>array('type'=>'string','enum'=>array('apply','rollback','status')),'operation_id'=>array('type'=>'string'),'site_uuid'=>array('type'=>'string'),
+				'expected'=>array('type'=>array('string','null')),'settings'=>array('type'=>array('object','null')),'confirm'=>array('type'=>'boolean'),
+			)),
+			'output_schema' => array('type'=>'object'), 'meta'=>array('annotations'=>array('readonly'=>false,'destructive'=>true),'show_in_rest'=>true),
+		));
+		emcp_tools_register_ability( 'emcp-tools/cloud-config-inspect', array(
+			'label' => __( 'Inspect managed Cloud settings', 'emcp-tools' ),
+			'description' => __( 'Read a versioned, fixed allowlist of stored EMCP settings for configuration previews. No settings are changed; secrets and free-text context are excluded.', 'emcp-tools' ),
+			'category' => 'emcp-tools', 'execute_callback' => array( $this, 'execute_config_inspect' ),
+			'permission_callback' => array( $this, 'check_permission' ),
+			'input_schema' => array( 'type' => 'object', 'properties' => new stdClass(), 'additionalProperties' => false ),
+			'output_schema' => array( 'type' => 'object' ),
+			'meta' => array( 'annotations' => array( 'readonly' => true, 'destructive' => false ), 'show_in_rest' => true ),
+		) );
 		emcp_tools_register_ability(
 			'emcp-tools/cloud-status',
 			array(
@@ -111,7 +148,7 @@ class EMCP_Tools_Cloud_Abilities {
 			'emcp-tools/cloud-config-sync',
 			array(
 				'label'               => __( 'Cloud Config Sync', 'emcp-tools' ),
-				'description'         => __( 'Push or pull a config blob (settings, brand_kit, tool_toggles) to/from EMCP Cloud.', 'emcp-tools' ),
+				'description'         => __( 'Push or pull a config blob (settings, brand_kit, tool_toggles) to/from EMCP Cloud. For settings, push sends this site\'s EMCP settings (data is ignored) and pull applies the stored settings to this site.', 'emcp-tools' ),
 				'category'            => 'emcp-tools',
 				'execute_callback'    => array( $this, 'execute_config_sync' ),
 				'permission_callback' => array( $this, 'check_permission' ),
@@ -158,6 +195,20 @@ class EMCP_Tools_Cloud_Abilities {
 				'meta'                => array( 'annotations' => array( 'readonly' => false, 'destructive' => false ), 'show_in_rest' => true ),
 			)
 		);
+	}
+
+	public function execute_config_inspect( $input ) {
+		if ( ! empty( (array) $input ) ) { return new WP_Error( 'invalid_input', 'This read accepts no settings or actions.' ); }
+		return EMCP_Tools_Settings_Sync::managed_snapshot();
+	}
+	public function execute_safe_updates( $input ) {
+		require_once __DIR__ . '/../cloud/class-safe-updates.php';
+		return EMCP_Tools_Safe_Updates::execute( $input );
+	}
+	public function execute_config_deploy( $input ) {
+		require_once __DIR__ . '/../cloud/class-config-deployment.php';
+		$result = EMCP_Tools_Config_Deployment::execute( $input );
+		return is_wp_error($result) ? array('status'=>'rejected','code'=>$result->get_error_code()) : $result;
 	}
 
 	/**
@@ -227,6 +278,12 @@ class EMCP_Tools_Cloud_Abilities {
 	public function execute_config_sync( $input ) {
 		$type      = isset( $input['type'] ) ? sanitize_key( (string) $input['type'] ) : '';
 		$direction = isset( $input['direction'] ) ? sanitize_key( (string) $input['direction'] ) : 'pull';
+		// Settings go through the same path as the Connection screen: a push
+		// sends this site's own settings and a pull applies them, so an agent
+		// cannot overwrite the workspace's shared settings with arbitrary data.
+		if ( 'settings' === $type && class_exists( 'EMCP_Tools_Settings_Sync' ) ) {
+			return 'push' === $direction ? EMCP_Tools_Settings_Sync::push() : EMCP_Tools_Settings_Sync::pull_and_apply();
+		}
 		if ( 'push' === $direction ) {
 			$data = isset( $input['data'] ) && is_array( $input['data'] ) ? $input['data'] : array();
 			$r    = EMCP_Tools_Cloud_Sync::push_config( $type, $data );

@@ -2,8 +2,8 @@
 /**
  * Page CRUD MCP abilities for Elementor.
  *
- * Registers 5 tools for creating, updating, clearing, importing,
- * and exporting Elementor pages.
+ * Registers tools for creating, updating, clearing, importing,
+ * exporting Elementor pages and regenerating their caches.
  *
  * @package EMCP_Tools
  * @since   1.0.0
@@ -57,6 +57,7 @@ class EMCP_Tools_Page_Abilities {
 			'emcp-tools/delete-page-content',
 			'emcp-tools/import-template',
 			'emcp-tools/export-page',
+			'emcp-tools/regenerate-css',
 		);
 	}
 
@@ -71,6 +72,84 @@ class EMCP_Tools_Page_Abilities {
 		$this->register_delete_page_content();
 		$this->register_import_template();
 		$this->register_export_page();
+		$this->register_regenerate_css();
+	}
+
+	private function register_regenerate_css(): void {
+		emcp_tools_register_ability( 'emcp-tools/regenerate-css', array(
+			'label' => __( 'Regenerate CSS & Data', 'emcp-tools' ),
+			'description' => __( 'Invalidates generated Elementor CSS and render/asset caches, which rebuild on the next frontend request. Default scope=page requires post_id and permission to edit that post. Site-wide scope=site requires manage_options and confirm:true. Does not change page content or clear third-party/CDN caches.', 'emcp-tools' ),
+			'category' => 'emcp-tools',
+			'execute_callback' => array( $this, 'execute_regenerate_css' ),
+			'permission_callback' => array( $this, 'check_regenerate_permission' ),
+			'input_schema' => array(
+				'type' => 'object',
+				'properties' => array(
+					'scope' => array( 'type' => 'string', 'enum' => array( 'page', 'site' ), 'default' => 'page' ),
+					'post_id' => array( 'type' => 'integer', 'minimum' => 1 ),
+					'confirm' => array( 'type' => 'boolean', 'default' => false ),
+				),
+			),
+			'output_schema' => array( 'type' => 'object', 'properties' => array(
+				'success' => array( 'type' => 'boolean' ),
+				'scope' => array( 'type' => 'string' ),
+				'post_id' => array( 'type' => 'integer' ),
+				'regeneration' => array( 'type' => 'string' ),
+			) ),
+			'meta' => array( 'annotations' => array( 'readonly' => false, 'destructive' => false, 'idempotent' => true ), 'show_in_rest' => true ),
+		) );
+	}
+
+	public function check_regenerate_permission( $input = null ): bool {
+		$scope = $input['scope'] ?? 'page';
+		if ( 'site' === $scope ) {
+			return current_user_can( 'manage_options' );
+		}
+		return 'page' === $scope && ! empty( $input['post_id'] ) && $this->check_edit_permission( $input );
+	}
+
+	public function execute_regenerate_css( $input ) {
+		$scope = $input['scope'] ?? 'page';
+		$post_id = $input['post_id'] ?? 0;
+		if ( ! in_array( $scope, array( 'page', 'site' ), true ) || ( 'page' === $scope && ( ! is_int( $post_id ) || $post_id < 1 ) ) || ( 'site' === $scope && isset( $input['post_id'] ) ) ) {
+			return new \WP_Error( 'invalid_scope', __( 'Use scope=page with a positive post_id, or scope=site without post_id.', 'emcp-tools' ) );
+		}
+		if ( ! $this->check_regenerate_permission( $input ) ) {
+			return new \WP_Error( 'forbidden', __( 'You cannot regenerate Elementor caches for this scope.', 'emcp-tools' ) );
+		}
+		if ( 'site' === $scope && true !== ( $input['confirm'] ?? false ) ) {
+			return new \WP_Error( 'confirmation_required', __( 'Site-wide regeneration requires confirm:true.', 'emcp-tools' ) );
+		}
+		if ( 'page' === $scope && ! get_post( $post_id ) ) {
+			return new \WP_Error( 'post_not_found', __( 'The requested post does not exist.', 'emcp-tools' ) );
+		}
+		try {
+			$result = $this->clear_elementor_cache( 'page' === $scope ? $post_id : 0 );
+		} catch ( \Throwable $error ) {
+			return new \WP_Error( 'cache_regeneration_failed', __( 'Elementor could not clear its generated caches. Check server logs and filesystem permissions.', 'emcp-tools' ) );
+		}
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+		return array( 'success' => true, 'scope' => $scope, 'post_id' => 'page' === $scope ? $post_id : 0, 'regeneration' => 'on_next_frontend_request' );
+	}
+
+	/** Official Elementor cache APIs; isolated for tests without filesystem writes. */
+	protected function clear_elementor_cache( int $post_id ) {
+		if ( ! class_exists( '\Elementor\Plugin' ) || ! isset( \Elementor\Plugin::$instance->files_manager ) ) {
+			return new \WP_Error( 'elementor_unavailable', __( 'Elementor cache management is unavailable.', 'emcp-tools' ) );
+		}
+		if ( 0 === $post_id ) {
+			\Elementor\Plugin::$instance->files_manager->clear_cache();
+		} else {
+			\Elementor\Core\Files\CSS\Post::create( $post_id )->delete();
+			delete_post_meta( $post_id, \Elementor\Core\Base\Document::CACHE_META_KEY );
+			delete_post_meta( $post_id, \Elementor\Core\Base\Elements_Iteration_Actions\Assets::ASSETS_META_KEY );
+			// Atomic styles have their own versioned cache. Scope the official
+			// clear hook to this post (both frontend and preview), never global.
+			do_action( 'elementor/atomic-widgets/styles/clear', array( 'local', $post_id ) );
+		}
+		return true;
 	}
 
 	/**
@@ -78,10 +157,16 @@ class EMCP_Tools_Page_Abilities {
 	 *
 	 * @since 1.0.0
 	 *
+	 * @param array|null $input The input data.
 	 * @return bool
 	 */
-	public function check_create_permission(): bool {
-		return current_user_can( 'publish_pages' ) || current_user_can( 'edit_pages' );
+	public function check_create_permission( $input = null ): bool {
+		$post_type = sanitize_key( $input['post_type'] ?? 'page' );
+		$status    = sanitize_key( $input['status'] ?? 'draft' );
+		if ( ! in_array( $post_type, array( 'page', 'post' ), true ) ) {
+			return false;
+		}
+		return true === EMCP_Tools_Post_Authorization::authorize_create( $post_type, $status ?: 'draft' );
 	}
 
 	/**
@@ -180,6 +265,8 @@ class EMCP_Tools_Page_Abilities {
 						'title'       => array( 'type' => 'string' ),
 						'edit_url'    => array( 'type' => 'string' ),
 						'preview_url' => array( 'type' => 'string' ),
+						'change_id'   => array( 'type' => 'string' ),
+						'warnings'    => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 				'meta'                => array(
@@ -210,6 +297,16 @@ class EMCP_Tools_Page_Abilities {
 		if ( empty( $title ) ) {
 			return new \WP_Error( 'missing_title', __( 'The title parameter is required.', 'emcp-tools' ) );
 		}
+		if ( ! in_array( $post_type, array( 'page', 'post' ), true ) ) {
+			return new \WP_Error( 'invalid_post_type', __( 'post_type must be page or post.', 'emcp-tools' ) );
+		}
+		if ( ! in_array( $status, array( 'draft', 'publish' ), true ) ) {
+			return new \WP_Error( 'invalid_status', __( 'status must be draft or publish.', 'emcp-tools' ) );
+		}
+		$authorization = EMCP_Tools_Post_Authorization::authorize_create( $post_type, $status );
+		if ( is_wp_error( $authorization ) ) {
+			return $authorization;
+		}
 
 		$post_id = wp_insert_post(
 			array(
@@ -233,16 +330,38 @@ class EMCP_Tools_Page_Abilities {
 			update_post_meta( $post_id, '_wp_page_template', sanitize_text_field( $input['template'] ) );
 		}
 
-		// Save initial content if provided.
-		if ( ! empty( $input['content'] ) && is_array( $input['content'] ) ) {
-			$save_result = $this->data->save_page_data( $post_id, $input['content'] );
-		} else {
-			// Save empty Elementor data to initialize.
-			$save_result = $this->data->save_page_data( $post_id, array() );
+		// Initialization belongs to the creation event; it is not a separate
+		// page edit whose undo would merely empty the newly created page.
+		$has_history = class_exists( 'EMCP_Tools_Change_Recorder' );
+		$was_suppressed = $has_history && EMCP_Tools_Change_Log::$suppress;
+		if ( $has_history ) {
+			EMCP_Tools_Change_Log::$suppress = true;
+		}
+		try {
+			$content = ! empty( $input['content'] ) && is_array( $input['content'] ) ? $input['content'] : array();
+			// Partial classic dimensions in caller content are left out (#151).
+			if ( ! empty( $content ) ) {
+				$content_guard = EMCP_Tools_Element_Factory::guard_tree( $content );
+				$content       = $content_guard['elements'];
+			}
+			$save_result = $this->data->save_page_data( $post_id, $content );
+		} catch ( \Throwable $error ) {
+			$save_result = new \WP_Error( 'initialization_failed', $error->getMessage() );
+		} finally {
+			if ( $has_history ) {
+				EMCP_Tools_Change_Log::$suppress = $was_suppressed;
+			}
+		}
+		$change_id = $has_history ? EMCP_Tools_Change_Recorder::record_resource_create( $post_id, 'elementor', 'create-page' ) : '';
+		if ( $has_history && ! $was_suppressed && '' === $change_id ) {
+			return new \WP_Error( 'history_record_failed', __( 'The page was created, but History could not save its creation. Inspect the page before retrying.', 'emcp-tools' ), array( 'post_id' => $post_id ) );
 		}
 
 		if ( is_wp_error( $save_result ) ) {
 			return $save_result;
+		}
+		if ( true !== $save_result ) {
+			return new \WP_Error( 'initialization_failed', __( 'The page was created, but Elementor initialization failed.', 'emcp-tools' ), array( 'post_id' => $post_id, 'change_id' => $change_id ) );
 		}
 
 		$edit_url    = admin_url( 'post.php?post=' . $post_id . '&action=elementor' );
@@ -253,6 +372,8 @@ class EMCP_Tools_Page_Abilities {
 			'title'       => $title,
 			'edit_url'    => $edit_url,
 			'preview_url' => $preview_url ? $preview_url : '',
+			'change_id'   => $change_id,
+			'warnings'    => $content_guard['warnings'] ?? array(),
 		);
 	}
 
@@ -286,8 +407,9 @@ class EMCP_Tools_Page_Abilities {
 				'output_schema'       => array(
 					'type'       => 'object',
 					'properties' => array(
-						'success' => array( 'type' => 'boolean' ),
-						'post_id' => array( 'type' => 'integer' ),
+						'success'  => array( 'type' => 'boolean' ),
+						'post_id'  => array( 'type' => 'integer' ),
+						'warnings' => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 				'meta'                => array(
@@ -310,6 +432,11 @@ class EMCP_Tools_Page_Abilities {
 			return new \WP_Error( 'missing_post_id', __( 'The post_id parameter is required.', 'emcp-tools' ) );
 		}
 
+		// Partial classic dimensions: fill from the stored page settings or skip (#151).
+		$stored   = get_post_meta( $post_id, '_elementor_page_settings', true );
+		$guard    = EMCP_Tools_Element_Factory::guard_settings( (array) $settings, is_array( $stored ) ? $stored : array() );
+		$settings = $guard['settings'];
+
 		$result = $this->data->save_page_settings( $post_id, $settings );
 
 		if ( is_wp_error( $result ) ) {
@@ -317,8 +444,9 @@ class EMCP_Tools_Page_Abilities {
 		}
 
 		return array(
-			'success' => true,
-			'post_id' => $post_id,
+			'success'  => true,
+			'post_id'  => $post_id,
+			'warnings' => $guard['warnings'],
 		);
 	}
 
@@ -418,6 +546,7 @@ class EMCP_Tools_Page_Abilities {
 					'properties' => array(
 						'success'        => array( 'type' => 'boolean' ),
 						'elements_count' => array( 'type' => 'integer' ),
+						'warnings'       => array( 'type' => 'array', 'items' => array( 'type' => 'string' ) ),
 					),
 				),
 				'meta'                => array(
@@ -455,6 +584,10 @@ class EMCP_Tools_Page_Abilities {
 		$template_json = $this->data->reassign_ids( $template_json );
 		$count         = $this->data->count_elements( $template_json );
 
+		// Partial classic dimensions in the imported tree are left out (#151).
+		$tree_guard    = EMCP_Tools_Element_Factory::guard_tree( (array) $template_json );
+		$template_json = $tree_guard['elements'];
+
 		// Insert at position.
 		if ( $position < 0 || $position >= count( $data ) ) {
 			$data = array_merge( $data, $template_json );
@@ -471,6 +604,7 @@ class EMCP_Tools_Page_Abilities {
 		return array(
 			'success'        => true,
 			'elements_count' => $count,
+			'warnings'       => $tree_guard['warnings'],
 		);
 	}
 
