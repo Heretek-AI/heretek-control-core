@@ -79,6 +79,35 @@ class EMCP_Tools_Pro_Prompts {
 	}
 
 	/**
+	 * Returns the cached or bundled prompts without remote fetching.
+	 *
+	 * @since 3.21.3
+	 *
+	 * @return array|null
+	 */
+	public static function cached_bundle() {
+		$local_bundle = EMCP_TOOLS_DIR . 'assets/prompts/prompts-bundle.json';
+		if ( file_exists( $local_bundle ) && is_readable( $local_bundle ) ) {
+			$data = json_decode( (string) file_get_contents( $local_bundle ), true );
+			if ( is_array( $data ) && ! empty( $data['categories'] ) ) {
+				return $data;
+			}
+		}
+
+		$cached = get_transient( self::CACHE_KEY );
+		if ( is_array( $cached ) && ! empty( $cached['categories'] ) ) {
+			return $cached;
+		}
+
+		$stored = get_option( self::STORE_KEY );
+		if ( is_array( $stored ) && ! empty( $stored['categories'] ) ) {
+			return $stored;
+		}
+
+		return null;
+	}
+
+	/**
 	 * Get the prompts bundle. Returns the cached copy when available.
 	 *
 	 * Bundle structure:

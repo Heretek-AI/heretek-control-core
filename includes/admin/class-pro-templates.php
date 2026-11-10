@@ -57,6 +57,30 @@ class EMCP_Tools_Pro_Templates {
 	}
 
 	/**
+	 * Returns the cached or bundled templates without remote fetching.
+	 *
+	 * @since 3.21.3
+	 *
+	 * @return array|null
+	 */
+	public static function cached_bundle() {
+		$local_bundle = EMCP_TOOLS_DIR . 'assets/templates/templates-bundle.json';
+		if ( file_exists( $local_bundle ) && is_readable( $local_bundle ) ) {
+			$data = json_decode( (string) file_get_contents( $local_bundle ), true );
+			if ( is_array( $data ) && ! empty( $data['categories'] ) ) {
+				return $data;
+			}
+		}
+
+		$cached = get_transient( self::CACHE_KEY );
+		if ( is_array( $cached ) && ! empty( $cached['categories'] ) ) {
+			return $cached;
+		}
+
+		return null;
+	}
+
+	/**
 	 * Get the templates bundle. Returns cached copy when available.
 	 *
 	 * Bundle shape:

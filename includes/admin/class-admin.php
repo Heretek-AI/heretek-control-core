@@ -868,7 +868,11 @@ class EMCP_Tools_Admin {
 		// categories). Hidden for free users and when the bundle can't be fetched.
 		if ( $this->module_tab_visible( 'templates' ) && class_exists( 'EMCP_Tools_Pro_Templates' ) && EMCP_Tools_Pro_Templates::user_has_access() ) {
 			$template_count  = 0;
-			$emcp_tpl_bundle = $cached_only ? EMCP_Tools_Pro_Templates::cached_bundle() : EMCP_Tools_Pro_Templates::get_bundle();
+			$emcp_tpl_bundle = $cached_only
+				? ( method_exists( 'EMCP_Tools_Pro_Templates', 'cached_bundle' )
+					? EMCP_Tools_Pro_Templates::cached_bundle()
+					: ( method_exists( 'EMCP_Tools_Pro_Templates', 'get_bundle' ) ? EMCP_Tools_Pro_Templates::get_bundle() : null ) )
+				: EMCP_Tools_Pro_Templates::get_bundle();
 			if ( ! is_wp_error( $emcp_tpl_bundle ) && is_array( $emcp_tpl_bundle ) && ! empty( $emcp_tpl_bundle['categories'] ) ) {
 				foreach ( $emcp_tpl_bundle['categories'] as $emcp_tpl_cat ) {
 					$template_count += is_array( $emcp_tpl_cat['templates'] ?? null ) ? count( $emcp_tpl_cat['templates'] ) : 0;

@@ -194,8 +194,8 @@ class EMCP_Tools_Redirect_Store {
 	private static function upgrade(): bool {
 		global $wpdb;
 		$t     = self::table();
-		$cols  = (array) $wpdb->get_col( "SHOW COLUMNS FROM {$t}" ); // phpcs:ignore WordPress.DB
-		$keys  = (array) $wpdb->get_col( "SHOW INDEX FROM {$t}", 2 ); // phpcs:ignore WordPress.DB -- column 2 is Key_name.
+		$cols  = array_map( 'strtolower', (array) $wpdb->get_col( "SHOW COLUMNS FROM {$t}" ) ); // phpcs:ignore WordPress.DB
+		$keys  = array_map( 'strtolower', (array) $wpdb->get_col( "SHOW INDEX FROM {$t}", 2 ) ); // phpcs:ignore WordPress.DB -- column 2 is Key_name.
 		$state = array(
 			'has_query_col'  => in_array( 'source_query', $cols, true ),
 			'has_key_col'    => in_array( 'source_key', $cols, true ),
@@ -206,10 +206,12 @@ class EMCP_Tools_Redirect_Store {
 		foreach ( self::upgrade_plan( $state ) as $step ) {
 			switch ( $step ) {
 				case 'add_query_col':
-					$ok = false !== $wpdb->query( "ALTER TABLE {$t} ADD COLUMN source_query VARCHAR(191) NOT NULL DEFAULT '' AFTER source_path" ); // phpcs:ignore WordPress.DB
+					$res = $wpdb->query( "ALTER TABLE {$t} ADD COLUMN source_query VARCHAR(191) NOT NULL DEFAULT '' AFTER source_path" ); // phpcs:ignore WordPress.DB
+					$ok  = false !== $res || false !== strpos( (string) $wpdb->last_error, 'Duplicate column' );
 					break;
 				case 'add_key_col':
-					$ok = false !== $wpdb->query( "ALTER TABLE {$t} ADD COLUMN source_key CHAR(40) NOT NULL DEFAULT '' AFTER source_query" ); // phpcs:ignore WordPress.DB
+					$res = $wpdb->query( "ALTER TABLE {$t} ADD COLUMN source_key CHAR(40) NOT NULL DEFAULT '' AFTER source_query" ); // phpcs:ignore WordPress.DB
+					$ok  = false !== $res || false !== strpos( (string) $wpdb->last_error, 'Duplicate column' );
 					break;
 				case 'backfill_keys':
 					$ok = false !== $wpdb->query( "UPDATE {$t} SET source_key = SHA1( CONCAT( source_path, '?', source_query ) ) WHERE source_key <> SHA1( CONCAT( source_path, '?', source_query ) )" ); // phpcs:ignore WordPress.DB
