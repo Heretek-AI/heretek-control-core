@@ -1,0 +1,330 @@
+/**
+ * Heretek Control Core — Blood & Steel Theme
+ *
+ * Gothic-tech dark steel surfaces and crimson blood accents for the
+ * React frame and admin interface.
+ *
+ * @package Heretek_Control_Core
+ */
+
+/* =========================================================================
+ * Fonts — Cinzel & Geist (self-hosted, SIL OFL)
+ * ========================================================================= */
+
+@font-face {
+	font-family: "Cinzel";
+	src: url("../fonts/Cinzel-Bold.woff2") format("woff2");
+	font-weight: 600 800;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: "Geist";
+	src: url("../fonts/Geist-Variable.woff2") format("woff2");
+	font-weight: 100 900;
+	font-style: normal;
+	font-display: swap;
+}
+
+/* =========================================================================
+ * CSS Custom Properties — Heretek Blood & Steel
+ * ========================================================================= */
+
+:root,
+:where(.emcp-app, .eui-portal, .eui-frame, .elementor-mcp-admin) {
+	--emcp-font: "Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+	--emcp-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	--mcp-font-heading: "Cinzel", "Geist", system-ui, sans-serif;
+
+	/* Core Brand: Crimson Blood */
+	--emcp-primary: #dc2626;
+	--emcp-primary-strong: #b91c1c;
+	--emcp-primary-tint: rgba(220, 38, 38, 0.16);
+	--emcp-primary-tint-2: rgba(220, 38, 38, 0.08);
+	--emcp-primary-soft: rgba(220, 38, 38, 0.35);
+	--emcp-hover-border: #ef4444;
+
+	/* Contrast Typography */
+	--emcp-ink: #f9fafb;
+	--emcp-ink-2: #f3f4f6;
+	--emcp-text-2: #d1d5db;
+	--emcp-text-3: #9ca3af;
+	--emcp-muted: #9ca3af;
+	--emcp-faint: #6b7280;
+
+	/* Void & Dark Steel Surfaces */
+	--emcp-bg: #09090b;
+	--emcp-surface: #121217;
+	--emcp-surface-2: #181820;
+	--emcp-border: #23232c;
+	--emcp-border-input: #2d2d38;
+	--emcp-divider: #1f1f28;
+	--emcp-divider-2: #282834;
+	--emcp-track: #1f1f28;
+	--emcp-toggle-off: #2c2c38;
+	--emcp-dark: #09090b;
+	--emcp-code-fg: #fca5a5;
+
+	/* Scrollbars */
+	--emcp-scrollbar: #7f1d1d;
+	--emcp-scrollbar-hover: #b91c1c;
+
+	/* Status Accents */
+	--emcp-success-bg: rgba(16, 185, 129, 0.14);
+	--emcp-success-fg: #34d399;
+	--emcp-success-dot: #10b981;
+	--emcp-warning-bg: rgba(245, 158, 11, 0.14);
+	--emcp-warning-fg: #fbbf24;
+	--emcp-warning-dot: #f59e0b;
+	--emcp-danger-bg: rgba(239, 68, 68, 0.14);
+	--emcp-danger-fg: #f87171;
+	--emcp-danger-icon: #dc2626;
+	--emcp-danger-border: rgba(239, 68, 68, 0.35);
+
+	/* Elevation */
+	--emcp-shadow-hover: 0 6px 18px rgba(0, 0, 0, 0.7);
+	--emcp-shadow-savebar: 0 12px 30px rgba(0, 0, 0, 0.9);
+	--emcp-shadow-dropdown: 0 12px 32px rgba(0, 0, 0, 0.85);
+}
+
+/* =========================================================================
+ * Base Frame & Typography
+ * ========================================================================= */
+
+#wpbody-content:has(.eui-frame) {
+	background: #09090b;
+}
+
+.eui-frame {
+	background: var(--emcp-bg) !important;
+	color: var(--emcp-ink) !important;
+}
+
+.eui-frame h1,
+.eui-frame h2,
+.eui-frame h3,
+.eui-frame-brand__name,
+.eui-card__title,
+.eui-page-header__title,
+.emcp-dash__section-head h2,
+.emcp-app h1,
+.emcp-app h2,
+.emcp-app h3 {
+	font-family: "Cinzel", "Geist", system-ui, serif !important;
+	letter-spacing: 0.02em !important;
+	color: #ffffff !important;
+}
+
+/* =========================================================================
+ * Sidebar & Header Chrome
+ * ========================================================================= */
+
+.eui-frame__sidebar {
+	background: #0d0d12 !important;
+	border-inline-end: 1px solid #1f1f27 !important;
+}
+
+.eui-frame__topbar {
+	background: #0d0d12 !important;
+	border-block-end: 1px solid #1f1f27 !important;
+}
+
+.eui-frame-brand__name {
+	font-size: 15px !important;
+	font-weight: 700 !important;
+}
+
+.eui-frame-brand__version {
+	color: #9ca3af !important;
+}
+
+.eui-frame-search {
+	background: var(--emcp-surface-2) !important;
+	border: 1px solid var(--emcp-border-input) !important;
+	color: var(--emcp-muted) !important;
+	border-radius: var(--emcp-r-sm) !important;
+}
+
+.eui-frame-search:hover {
+	border-color: var(--emcp-hover-border) !important;
+	color: var(--emcp-ink) !important;
+}
+
+.eui-frame-search__kbd {
+	background: var(--emcp-surface) !important;
+	border: 1px solid var(--emcp-border) !important;
+	color: var(--emcp-muted) !important;
+}
+
+.eui-frame-nav__group {
+	color: var(--emcp-muted) !important;
+}
+
+.eui-frame-nav__group:hover {
+	color: var(--emcp-ink) !important;
+}
+
+.eui-frame-nav__item {
+	color: var(--emcp-text-2) !important;
+	transition: all 0.15s ease !important;
+}
+
+.eui-frame-nav__item:hover:not(.is-active) {
+	background: rgba(220, 38, 38, 0.08) !important;
+	color: #ffffff !important;
+}
+
+.eui-frame-nav__item.is-active {
+	background: rgba(220, 38, 38, 0.18) !important;
+	color: #f87171 !important;
+	border-inline-start: 3px solid #dc2626 !important;
+	font-weight: 600 !important;
+}
+
+.eui-frame-nav__count {
+	background: rgba(220, 38, 38, 0.25) !important;
+	color: #fca5a5 !important;
+}
+
+/* =========================================================================
+ * Cards, Health Card & Dashboard
+ * ========================================================================= */
+
+.eui-card,
+.emcp-dash__health,
+.eui-notifs__item {
+	background: var(--emcp-surface) !important;
+	border: 1px solid var(--emcp-border) !important;
+}
+
+.eui-card--interactive:hover {
+	border-color: var(--emcp-hover-border) !important;
+	box-shadow: 0 4px 18px rgba(220, 38, 38, 0.16) !important;
+}
+
+.emcp-dash__cell {
+	color: var(--emcp-ink) !important;
+}
+
+.emcp-dash__cell + .emcp-dash__cell {
+	border-left: 1px solid var(--emcp-divider) !important;
+}
+
+.emcp-dash__cell:hover {
+	background: rgba(220, 38, 38, 0.04) !important;
+}
+
+.emcp-dash__health-icon {
+	background: var(--emcp-primary-tint) !important;
+	color: var(--emcp-primary) !important;
+}
+
+.emcp-dash__health-icon.is-server,
+.emcp-dash__health-icon.is-version {
+	background: var(--emcp-success-bg) !important;
+	color: var(--emcp-success-fg) !important;
+}
+
+.emcp-dash__health-icon.is-off {
+	background: var(--emcp-danger-bg) !important;
+	color: var(--emcp-danger-fg) !important;
+}
+
+.emcp-dash__change {
+	border-bottom: 1px solid var(--emcp-divider) !important;
+}
+
+.emcp-dash__change.is-rolled-back {
+	background: var(--emcp-surface-2) !important;
+}
+
+.emcp-dash__alert {
+	background: var(--emcp-surface) !important;
+	border-color: var(--emcp-border) !important;
+}
+
+/* Activity Chart — Blood Crimson Fill */
+.eui-chart__col rect,
+.eui-chart__svg rect {
+	fill: #dc2626 !important;
+}
+
+/* =========================================================================
+ * Buttons & Inputs
+ * ========================================================================= */
+
+.eui-btn--primary {
+	background: var(--emcp-primary) !important;
+	color: #ffffff !important;
+	border-color: var(--emcp-primary-strong) !important;
+	box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3) !important;
+}
+
+.eui-btn--primary:hover:not(:disabled) {
+	background: var(--emcp-primary-strong) !important;
+	color: #ffffff !important;
+	box-shadow: 0 0 14px rgba(220, 38, 38, 0.6) !important;
+}
+
+.eui-btn--secondary {
+	background: var(--emcp-surface-2) !important;
+	border-color: var(--emcp-border-input) !important;
+	color: var(--emcp-ink) !important;
+}
+
+.eui-btn--secondary:hover:not(:disabled) {
+	border-color: var(--emcp-hover-border) !important;
+	color: #ffffff !important;
+}
+
+.eui-input,
+.eui-select,
+.eui-textarea {
+	background: var(--emcp-surface-2) !important;
+	border: 1px solid var(--emcp-border-input) !important;
+	color: var(--emcp-ink) !important;
+}
+
+.eui-input:focus,
+.eui-select:focus,
+.eui-textarea:focus {
+	border-color: var(--emcp-primary) !important;
+	box-shadow: 0 0 0 1px var(--emcp-primary) !important;
+	outline: none !important;
+}
+
+/* Badges */
+.eui-badge--tier-pro,
+.eui-badge--status-info {
+	background: var(--emcp-primary-tint) !important;
+	color: #f87171 !important;
+}
+
+/* Pro Plan Active Pill on Dashboard */
+.emcp-app [class*="badge"],
+.emcp-app [class*="pro-badge"],
+.eui-frame span:has(> [data-icon="check-circle"]) {
+	color: #34d399 !important;
+}
+
+/* Scrollbars */
+.eui-frame ::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.eui-frame ::-webkit-scrollbar-track {
+	background: #09090b;
+	border-left: 1px solid #1f1f27;
+}
+
+.eui-frame ::-webkit-scrollbar-thumb {
+	background: #7f1d1d;
+	border-radius: 4px;
+	border: 1px solid rgba(220, 38, 38, 0.35);
+}
+
+.eui-frame ::-webkit-scrollbar-thumb:hover {
+	background: #b91c1c;
+}

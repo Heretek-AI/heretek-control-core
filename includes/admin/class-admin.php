@@ -784,6 +784,22 @@ class EMCP_Tools_Admin {
 		if ( null !== $screen ) {
 			$this->enqueue_screen( $screen );
 		}
+
+		if ( file_exists( EMCP_TOOLS_DIR . 'assets/css/heretek-theme.css' ) ) {
+			$theme_deps = array( 'emcp-admin-shell' );
+			if ( null !== $screen ) {
+				$screen_handle = 'emcp-admin-screen-' . $screen;
+				if ( wp_style_is( $screen_handle, 'registered' ) || wp_style_is( $screen_handle, 'enqueued' ) ) {
+					$theme_deps[] = $screen_handle;
+				}
+			}
+			wp_enqueue_style(
+				'heretek-control-theme',
+				EMCP_TOOLS_URL . 'assets/css/heretek-theme.css',
+				$theme_deps,
+				EMCP_TOOLS_VERSION
+			);
+		}
 	}
 
 	/**

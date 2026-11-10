@@ -248,7 +248,7 @@ final class EMCP_Tools_Admin_Dashboard_Data {
 				/* translators: 1: enabled tools, 2: total tools. */
 				'label'    => sprintf( __( '%1$d of %2$d tools', 'emcp-tools' ), $enabled, $total ),
 				/* translators: %d: number of disabled tools. */
-				'sub'      => sprintf( __( '%d disabled', 'emcp-tools' ), $disabled ),
+				'sub'      => sprintf( __( '%d disabled · 596 in catalog (Pro Unlocked)', 'emcp-tools' ), $disabled ),
 			),
 			'version' => array(
 				'current' => (string) $ver['current'],

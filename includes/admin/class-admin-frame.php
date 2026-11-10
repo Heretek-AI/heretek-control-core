@@ -76,58 +76,7 @@ final class EMCP_Tools_Admin_Frame {
 	 * @return array[]
 	 */
 	public static function announcements( bool $show_upgrade ): array {
-		$list = array(
-			array(
-				'key'   => 'cloud',
-				'badge' => __( 'New', 'emcp-tools' ),
-				'icon'  => 'cloud',
-				'title' => __( 'EMCP Cloud is live.', 'emcp-tools' ),
-				'text'  => __( 'Back up, sync and sell your blocks, widgets and snippets across every site you run.', 'emcp-tools' ),
-				'cta'   => __( 'Explore Cloud', 'emcp-tools' ),
-				'url'   => 'https://emcptools.com/cloud',
-			),
-		);
-		if ( $show_upgrade ) {
-			$upgrade = function_exists( 'emcp_tools_upgrade_url' ) ? emcp_tools_upgrade_url() : 'https://emcptools.com/pricing';
-			$list[]  = array(
-				'key'   => 'pro',
-				'badge' => __( 'Pro', 'emcp-tools' ),
-				'icon'  => 'crown',
-				'title' => __( 'Upgrade to EMCP Pro.', 'emcp-tools' ),
-				'text'  => __( 'Unlock AI Chat, the Widget and Block Builder, Templates, Skills and scheduled backups.', 'emcp-tools' ),
-				'cta'   => __( 'Upgrade to Pro', 'emcp-tools' ),
-				'url'   => $upgrade,
-			);
-			$list[]  = array(
-				'key'   => 'ltd',
-				'badge' => __( 'Limited', 'emcp-tools' ),
-				'icon'  => 'sparkles',
-				'title' => __( 'Lifetime deal ends soon.', 'emcp-tools' ),
-				'text'  => __( 'Pay once and own EMCP Pro forever. This lifetime deal is going away for good.', 'emcp-tools' ),
-				'cta'   => __( 'Get the LTD', 'emcp-tools' ),
-				'url'   => $upgrade,
-			);
-		}
-		$list[] = array(
-			'key'   => 'whatsnew',
-			'badge' => EMCP_TOOLS_VERSION,
-			'icon'  => 'gift',
-			/* translators: %s: plugin version. */
-			'title' => sprintf( __( 'What\'s new in %s.', 'emcp-tools' ), EMCP_TOOLS_VERSION ),
-			'text'  => __( 'Ten new Pro integrations, from Polylang and Tutor LMS to Amelia and MailPoet, each with undo.', 'emcp-tools' ),
-			'cta'   => __( 'See what\'s new', 'emcp-tools' ),
-			'url'   => admin_url( 'admin.php?page=' . EMCP_Tools_Admin::PAGE_SLUG . '-changelog' ),
-		);
-		$list[] = array(
-			'key'   => 'community',
-			'badge' => __( 'Community', 'emcp-tools' ),
-			'icon'  => 'users',
-			'title' => __( 'Join the EMCP community.', 'emcp-tools' ),
-			'text'  => __( 'Share builds, get help and hear about releases first in our Facebook group.', 'emcp-tools' ),
-			'cta'   => __( 'Join the group', 'emcp-tools' ),
-			'url'   => 'https://www.facebook.com/groups/emcptools',
-		);
-		return $list;
+		return array();
 	}
 
 	/**
@@ -194,8 +143,8 @@ final class EMCP_Tools_Admin_Frame {
 		// where a nested complementary landmark is an accessibility error.
 		$html  = '<div class="eui-frame__sidebar" id="emcp-frame-sidebar">';
 		$html .= '<div class="eui-frame-brand"><img class="eui-frame-brand__logo" src="' . esc_url( EMCP_TOOLS_URL . 'assets/img/icon-sm.png' ) . '" alt="" width="32" height="32">'
-			. '<span class="eui-frame-brand__text"><span class="eui-frame-brand__name">' . esc_html__( 'EMCP Tools', 'emcp-tools' ) . '</span>'
-			. '<span class="eui-frame-brand__version eui-mono">v' . esc_html( $version ) . ' · ' . esc_html( $premium ? __( 'Pro', 'emcp-tools' ) : __( 'Free', 'emcp-tools' ) ) . '</span></span></div>';
+			. '<span class="eui-frame-brand__text"><span class="eui-frame-brand__name">' . esc_html__( 'Heretek Core', 'emcp-tools' ) . '</span>'
+			. '<span class="eui-frame-brand__version eui-mono">v' . esc_html( $version ) . ' · ' . esc_html__( 'Pro Unlocked', 'emcp-tools' ) . '</span></span></div>';
 		$html .= '<button type="button" class="eui-frame-search" data-emcp-palette-open>' . EMCP_Tools_Admin_Icons::svg( 'search', 16 )
 			. '<span class="eui-frame-search__label">' . esc_html__( 'Search...', 'emcp-tools' ) . '</span>'
 			. '<kbd class="eui-frame-search__kbd">' . esc_html__( 'Ctrl K', 'emcp-tools' ) . '</kbd></button>';
