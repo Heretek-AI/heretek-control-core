@@ -556,10 +556,10 @@ trait EMCP_Tools_Admin_Catalog_Trait {
 			'wp_litespeed' => array(
 				'platform' => 'plugins', 'group' => 'performance',
 				'label' => __( 'LiteSpeed Cache', 'emcp-tools' ),
-				'note' => __( 'Effective cache status and confirmed page-cache purges on supported servers.', 'emcp-tools' ),
+				'note' => __( 'Effective cache status, optimization exclusions, and confirmed page-cache purges on supported servers.', 'emcp-tools' ),
 				'tools' => array(
 					'emcp-tools/litespeed-read' => array(
-						'label' => __( 'LiteSpeed Cache Read', 'emcp-tools' ), 'description' => __( 'Read cache flags, TTL and actual server support.', 'emcp-tools' ),
+						'label' => __( 'LiteSpeed Cache Read', 'emcp-tools' ), 'description' => __( 'Read cache flags, TTL, optimization exclusions, and actual server support.', 'emcp-tools' ),
 						'badges' => array( 'read-only' ), 'operations' => array( 'status' ),
 						'available' => class_exists( 'EMCP_Tools_Litespeed_Api' ) && EMCP_Tools_Litespeed_Api::active(), 'requires' => array( 'name' => 'LiteSpeed Cache', 'kind' => 'plugin' ),
 					),
@@ -567,6 +567,57 @@ trait EMCP_Tools_Admin_Catalog_Trait {
 						'label' => __( 'LiteSpeed Cache Write', 'emcp-tools' ), 'description' => __( 'Request a path or page-cache purge over HTTP on a supported server.', 'emcp-tools' ),
 						'badges' => array( 'destructive' ), 'operations' => array( 'purge-path', 'purge-page-cache' ),
 						'available' => class_exists( 'EMCP_Tools_Litespeed_Api' ) && EMCP_Tools_Litespeed_Api::active(), 'requires' => array( 'name' => 'LiteSpeed Cache', 'kind' => 'plugin' ),
+					),
+				),
+			),
+			'wp_heretek_analytics' => array(
+				'platform' => 'plugins', 'group' => 'marketing', 'pro' => true,
+				'label' => __( 'Heretek Analytics', 'emcp-tools' ),
+				'note' => __( 'GA4 Data API telemetry, realtime active users, author/character/chapter rankings, and custom dimension provisioning.', 'emcp-tools' ),
+				'tools' => array(
+					'emcp-tools/analytics-read' => array(
+						'label' => __( 'Heretek Analytics Read', 'emcp-tools' ), 'description' => __( 'Read GA4 status, realtime users, dashboard KPIs, and comic taxonomy rankings.', 'emcp-tools' ),
+						'badges' => array( 'read-only' ), 'operations' => array( 'get-status', 'get-realtime', 'get-dashboard', 'get-taxonomy-ranking' ),
+						'available' => class_exists( 'EMCP_Tools_Analytics_Integration' ) && EMCP_Tools_Analytics_Integration::is_active(), 'requires' => array( 'name' => 'Heretek Analytics', 'kind' => 'plugin' ),
+					),
+					'emcp-tools/analytics-write' => array(
+						'label' => __( 'Heretek Analytics Write', 'emcp-tools' ), 'description' => __( 'Provision GA4 custom dimensions, flush analytics cache, and resolve duplicate tag conflicts.', 'emcp-tools' ),
+						'badges' => array(), 'operations' => array( 'provision-dimensions', 'flush-cache', 'resolve-sitekit-conflict' ),
+						'available' => class_exists( 'EMCP_Tools_Analytics_Integration' ) && EMCP_Tools_Analytics_Integration::is_active(), 'requires' => array( 'name' => 'Heretek Analytics', 'kind' => 'plugin' ),
+					),
+				),
+			),
+			'wp_comic_easel' => array(
+				'platform' => 'plugins', 'group' => 'dynamic', 'pro' => true,
+				'label' => __( 'Comic Easel', 'emcp-tools' ),
+				'note' => __( 'Webcomic publishing, chapter trees, character rosters, storylines, and media sequencing.', 'emcp-tools' ),
+				'tools' => array(
+					'emcp-tools/comic-read' => array(
+						'label' => __( 'Comic Easel Read', 'emcp-tools' ), 'description' => __( 'Inspect comics, chapters, characters, locations, navigation chains, and publishing stats.', 'emcp-tools' ),
+						'badges' => array( 'read-only' ), 'operations' => array( 'get-comic-status', 'list-comics', 'get-comic', 'get-comic-navigation', 'list-chapters', 'get-chapter-tree', 'list-characters', 'list-locations', 'get-storyline-overview' ),
+						'available' => class_exists( 'EMCP_Tools_Comic_Easel_Integration' ) && EMCP_Tools_Comic_Easel_Integration::is_active(), 'requires' => array( 'name' => 'Comic Easel', 'kind' => 'plugin' ),
+					),
+					'emcp-tools/comic-write' => array(
+						'label' => __( 'Comic Easel Write', 'emcp-tools' ), 'description' => __( 'Create, update, schedule, or reorder comics, chapters, characters, and locations.', 'emcp-tools' ),
+						'badges' => array(), 'operations' => array( 'create-comic', 'update-comic', 'delete-comic', 'set-comic-media', 'assign-comic-taxonomies', 'create-chapter', 'update-chapter', 'reorder-chapters', 'create-character', 'create-location', 'bulk-Import-comics' ),
+						'available' => class_exists( 'EMCP_Tools_Comic_Easel_Integration' ) && EMCP_Tools_Comic_Easel_Integration::is_active(), 'requires' => array( 'name' => 'Comic Easel', 'kind' => 'plugin' ),
+					),
+				),
+			),
+			'wp_ads_monetization' => array(
+				'platform' => 'plugins', 'group' => 'marketing', 'pro' => true,
+				'label' => __( 'Ads & Monetization (WP Quads + ExoClick)', 'emcp-tools' ),
+				'note' => __( 'WP Quads ad slot management, /ads.txt validation, and ExoClick API statistics and zone management.', 'emcp-tools' ),
+				'tools' => array(
+					'emcp-tools/ads-read' => array(
+						'label' => __( 'Ads & Monetization Read', 'emcp-tools' ), 'description' => __( 'Inspect WP Quads ad slots, /ads.txt records, and ExoClick reporting.', 'emcp-tools' ),
+						'badges' => array( 'read-only' ), 'operations' => array( 'get-status', 'list-ads', 'get-ad', 'get-positions', 'get-ads-txt', 'exoclick-get-sites', 'exoclick-get-zones', 'exoclick-get-stats' ),
+						'available' => class_exists( 'EMCP_Tools_Ads_Integration' ) && EMCP_Tools_Ads_Integration::is_active(), 'requires' => array( 'name' => 'WP Quads', 'kind' => 'plugin' ),
+					),
+					'emcp-tools/ads-write' => array(
+						'label' => __( 'Ads & Monetization Write', 'emcp-tools' ), 'description' => __( 'Create or update WP Quads ad slots, edit /ads.txt, flush ad caches, and manage ExoClick zones.', 'emcp-tools' ),
+						'badges' => array(), 'operations' => array( 'create-ad', 'update-ad', 'toggle-ad', 'delete-ad', 'set-ads-txt', 'flush-cache', 'set-exoclick-config', 'exoclick-create-zone', 'exoclick-verify-site' ),
+						'available' => class_exists( 'EMCP_Tools_Ads_Integration' ) && EMCP_Tools_Ads_Integration::is_active(), 'requires' => array( 'name' => 'WP Quads', 'kind' => 'plugin' ),
 					),
 				),
 			),

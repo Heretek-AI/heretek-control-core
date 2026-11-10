@@ -425,6 +425,13 @@ class EMCP_Tools_Ability_Registrar {
 			$this->ability_names = array_merge( $this->ability_names, $ads_integration->get_ability_names() );
 		}
 
+		// Heretek Analytics abilities (GA4 telemetry, realtime active users, custom dimensions).
+		if ( class_exists( 'EMCP_Tools_Analytics_Integration' ) && EMCP_Tools_Analytics_Integration::is_active() ) {
+			$analytics_integration = new EMCP_Tools_Analytics_Integration();
+			$analytics_integration->register();
+			$this->ability_names = array_merge( $this->ability_names, $analytics_integration->get_ability_names() );
+		}
+
 		// Forms-tab integrations. CF7 is free; the five entry-storing plugins are
 		// Pro. Each registers only when its plugin is active (is_available()).
 		$form_integrations = array();

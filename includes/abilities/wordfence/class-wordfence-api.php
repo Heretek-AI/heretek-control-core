@@ -7,7 +7,7 @@ final class EMCP_Tools_Wordfence_Api {
 	public static function error( string $code, string $message ): WP_Error { return new WP_Error( $code, $message ); }
 	public static function ready() {
 		if ( ! self::active() ) { return self::error( 'plugin_inactive', 'Activate Wordfence first.' ); }
-		if ( '9.0.2' !== WORDFENCE_VERSION || ! class_exists( 'wfIssues' ) || ! class_exists( 'wfBlock' ) ) { return self::error( 'unsupported_version', 'This Wordfence version has not been qualified.' ); }
+		if ( version_compare( WORDFENCE_VERSION, '9.0.2', '<' ) || ! class_exists( 'wfIssues' ) || ! class_exists( 'wfBlock' ) ) { return self::error( 'unsupported_version', 'This Wordfence version has not been qualified.' ); }
 		if ( is_multisite() ) { return self::error( 'unsupported_environment', 'This adapter currently supports single sites.' ); }
 		return true;
 	}

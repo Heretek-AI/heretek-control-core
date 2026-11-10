@@ -636,7 +636,12 @@ class EMCP_Tools_Ads_Write_Operations {
 		// LiteSpeed Cache purge
 		if ( function_exists( 'do_action' ) ) {
 			do_action( 'litespeed_purge_all' );
+			do_action( 'litespeed_purge_ucss' );
 			$purged[] = 'litespeed_purge_all';
+		}
+		if ( class_exists( 'LiteSpeed\\Purge' ) && is_callable( array( 'LiteSpeed\\Purge', 'purge_all' ) ) ) {
+			\LiteSpeed\Purge::purge_all( 'EMCP Ads Flush' );
+			$purged[] = 'litespeed_native_purge_all';
 		}
 
 		// Object Cache

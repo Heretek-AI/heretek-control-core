@@ -7,7 +7,7 @@ final class EMCP_Tools_Litespeed_Api {
 	public static function error( string $code, string $message ): WP_Error { return new WP_Error( $code, $message ); }
 	public static function ready() {
 		if ( ! self::active() ) { return self::error( 'plugin_inactive', 'Activate LiteSpeed Cache first.' ); }
-		if ( '7.9.2' !== LSCWP_V || ! is_callable( array( 'LiteSpeed\\Purge', 'purge_all_lscache' ) ) ) { return self::error( 'unsupported_version', 'This LiteSpeed Cache version has not been qualified.' ); }
+		if ( version_compare( LSCWP_V, '7.9.2', '<' ) || ! is_callable( array( 'LiteSpeed\\Purge', 'purge_all_lscache' ) ) ) { return self::error( 'unsupported_version', 'This LiteSpeed Cache version has not been qualified.' ); }
 		if ( is_multisite() ) { return self::error( 'unsupported_environment', 'This adapter currently supports single sites.' ); }
 		return true;
 	}
@@ -19,14 +19,25 @@ final class EMCP_Tools_Litespeed_Api {
 			&& ! preg_match( '/%(?![0-9a-f]{2})/i', $path );
 	}
 	public static function read( string $operation, array $args ): array {
-		$keys = array( 'cache', 'cache-ttl_pub', 'cache-ttl_priv', 'cache-ttl_frontpage', 'optm-css_min', 'optm-js_min', 'optm-html_min' );
+		$keys = array( 'cache', 'cache-ttl_pub', 'cache-ttl_priv', 'cache-ttl_frontpage', 'guest', 'optm-css_min', 'optm-js_min', 'optm-html_min', 'optm-js_defer', 'optm-emoji_rm', 'media-lazy', 'media-iframe_lazy', 'optm-js_exc', 'optm-js_defer_exc', 'media-lazy_parent_cls_exc', 'media-iframe_lazy_cls_exc', 'media-iframe_lazy_parent_cls_exc', 'optm-dns_prefetch' );
+		$list_keys = array( 'optm-js_exc', 'optm-js_defer_exc', 'media-lazy_parent_cls_exc', 'media-iframe_lazy_cls_exc', 'media-iframe_lazy_parent_cls_exc', 'optm-dns_prefetch' );
 		wp_cache_delete( 'alloptions', 'options' ); wp_cache_delete( 'notoptions', 'options' );
 		foreach ( $keys as $key ) { wp_cache_delete( LiteSpeed\Conf::name( $key ), 'options' ); }
 		$conf = LiteSpeed\Conf::cls(); $conf->load_options();
 		$cli = defined( 'WP_CLI' ) && WP_CLI;
 		$server = defined( 'LITESPEED_SERVER_TYPE' ) ? LITESPEED_SERVER_TYPE : 'LITESPEED_SERVER_NONE';
 		$supported = ! $cli && in_array( $server, array( 'LITESPEED_SERVER_OLS', 'LITESPEED_SERVER_ENT', 'LITESPEED_SERVER_ADC' ), true ) && defined( 'LITESPEED_ALLOWED' ) && LITESPEED_ALLOWED;
-		$settings = array(); foreach ( $keys as $key ) { $settings[ $key ] = str_contains( $key, 'ttl_' ) ? (int) $conf->conf( $key ) : (bool) $conf->conf( $key ); }
+		$settings = array();
+		foreach ( $keys as $key ) {
+			if ( in_array( $key, $list_keys, true ) ) {
+				$val = $conf->conf( $key );
+				$settings[ $key ] = is_array( $val ) ? array_values( $val ) : array();
+			} elseif ( str_contains( $key, 'ttl_' ) || 'optm-js_defer' === $key ) {
+				$settings[ $key ] = (int) $conf->conf( $key );
+			} else {
+				$settings[ $key ] = (bool) $conf->conf( $key );
+			}
+		}
 		return array( 'version' => LSCWP_V, 'server' => $cli ? 'unknown_cli' : $server, 'transport' => $cli ? 'cli' : 'http', 'server_supported' => $supported, 'purge_supported' => $supported && $settings['cache'], 'settings' => $settings, 'purge_note' => 'Purge requests require HTTP on a supported cache server. Verify a subsequent cache response to confirm invalidation.' );
 	}
 	public static function write( string $operation, array $args ) {

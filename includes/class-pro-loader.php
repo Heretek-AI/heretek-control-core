@@ -144,6 +144,9 @@ final class EMCP_Tools_Pro_Loader {
 		'includes/abilities/ads/class-ads-read-operations.php',
 		'includes/abilities/ads/class-ads-write-operations.php',
 		'includes/abilities/ads/class-ads-integration.php',
+		'includes/abilities/analytics/class-analytics-read-operations.php',
+		'includes/abilities/analytics/class-analytics-write-operations.php',
+		'includes/abilities/analytics/class-analytics-integration.php',
 		// FunnelKit (3.19.0): the shared REST client and dispatcher load before the tools that extend them.
 		'includes/abilities/funnelkit/class-funnelkit-rest.php',
 		'includes/abilities/funnelkit/class-funnelkit-dispatcher.php',
