@@ -251,6 +251,8 @@ if ( ! function_exists( 'update_post_meta' ) ) {
 		}
 		$GLOBALS['emcp_test']['postmeta'][ $post_id ][ $key ] = $value;
 		return true;
+	}
+}
 
 if ( ! function_exists( 'get_post_type' ) ) {
 	function get_post_type( $post = null ) {

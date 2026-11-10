@@ -254,7 +254,6 @@ class EMCP_Tools_Plugin {
 				wp_get_ability( 'emcp-tools/list-pages' );
 			}
 		}
-		}
 		return is_array( $this->ability_names ) ? $this->ability_names : array();
 	}
 
